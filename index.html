@@ -1,0 +1,994 @@
+<!DOCTYPE html>
+<html lang="en">
+
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Amazon Wholesale Scanner</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/PapaParse/5.4.1/papaparse.min.js"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/xlsx/0.18.5/xlsx.full.min.js"></script>
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet">
+    <style>
+        * {
+            font-family: 'Inter', sans-serif;
+        }
+
+        body {
+            background: #0d1117;
+        }
+
+        .scanner-card {
+            background: #161b22;
+            border: 1px solid #30363d;
+        }
+
+        .table-wrap {
+            background: #161b22;
+            border: 1px solid #30363d;
+            border-radius: 12px;
+        }
+
+        thead th {
+            position: sticky;
+            top: 0;
+            z-index: 10;
+            background: #0d1117;
+            border-bottom: 2px solid #21262d;
+        }
+
+        .filter-input {
+            background: #21262d !important;
+            color: #c9d1d9 !important;
+            border-color: #30363d !important;
+        }
+
+        .filter-input::placeholder {
+            color: #484f58;
+        }
+
+        .filter-input:focus {
+            outline: none;
+            border-color: #58a6ff !important;
+            box-shadow: 0 0 0 2px rgba(88, 166, 255, 0.15);
+        }
+
+        tbody tr {
+            transition: all 0.15s ease;
+            border-left: 3px solid transparent;
+        }
+
+        tbody tr:hover {
+            background: #1c2128 !important;
+            border-left-color: #58a6ff !important;
+        }
+
+        tbody tr.roi-hot {
+            border-left-color: #3fb950;
+        }
+
+        tbody tr.roi-mid {
+            border-left-color: #d29922;
+        }
+
+        tbody tr.roi-low {
+            border-left-color: #f85149;
+        }
+
+        .badge {
+            display: inline-flex;
+            align-items: center;
+            gap: 3px;
+            padding: 2px 8px;
+            border-radius: 20px;
+            font-size: 10px;
+            font-weight: 700;
+            letter-spacing: 0.3px;
+        }
+
+        .badge-amazon {
+            background: #EA8D001A;
+            color: #EA8D00;
+            border: 1px solid #EA8D0044;
+        }
+
+        .badge-fba {
+            background: #1F6FEB1A;
+            color: #58a6ff;
+            border: 1px solid #1F6FEB44;
+        }
+
+        .badge-fbm {
+            background: #8957e51A;
+            color: #bc8cff;
+            border: 1px solid #8957e544;
+        }
+
+        .badge-oos {
+            background: #8b949e1A;
+            color: #8b949e;
+            border: 1px solid #8b949e44;
+        }
+
+        .badge-clear {
+            background: #3fb9501A;
+            color: #3fb950;
+            border: 1px solid #3fb95044;
+        }
+
+        .badge-blocked {
+            background: #f851491A;
+            color: #f85149;
+            border: 1px solid #f8514944;
+        }
+
+        .badge-hot {
+            background: #3fb9501A;
+            color: #3fb950;
+            border: 1px solid #3fb95044;
+        }
+
+        .badge-good {
+            background: #d299221A;
+            color: #d29922;
+            border: 1px solid #d2992244;
+        }
+
+        .badge-slow {
+            background: #8b949e1A;
+            color: #8b949e;
+            border: 1px solid #8b949e44;
+        }
+
+        ::-webkit-scrollbar {
+            height: 6px;
+            width: 6px;
+        }
+
+        ::-webkit-scrollbar-track {
+            background: #161b22;
+        }
+
+        ::-webkit-scrollbar-thumb {
+            background: #30363d;
+            border-radius: 3px;
+        }
+    </style>
+</head>
+
+<body class="min-h-screen text-gray-100" style="background:#0d1117">
+    <div class="max-w-[98%] mx-auto py-8 px-4">
+
+        <div class="max-w-7xl mx-auto scanner-card rounded-xl shadow-2xl px-6 py-4 mb-4">
+            <div class="flex items-center gap-4 flex-wrap">
+                <!-- Title -->
+                <span class="text-lg font-bold text-white whitespace-nowrap">🚀 Wholesale Scanner</span>
+                <div class="w-px h-8" style="background:#30363d"></div>
+
+                <!-- File -->
+                <div class="flex items-center gap-2">
+                    <input type="file" id="csvFile" accept=".csv, .xls, .xlsx" class="hidden">
+                    <label for="csvFile"
+                        class="cursor-pointer bg-blue-600 hover:bg-blue-700 text-white text-xs font-semibold py-2 px-4 rounded-lg shadow transition-colors whitespace-nowrap">
+                        📂 Select File
+                    </label>
+                    <div id="fileInfo" class="text-xs font-medium" style="color:#8b949e">No file selected</div>
+                </div>
+
+                <div class="w-px h-8" style="background:#30363d"></div>
+
+                <!-- Prep Fee -->
+                <div class="flex items-center gap-2">
+                    <label class="text-xs font-semibold whitespace-nowrap" style="color:#8b949e">Prep Fee ($)</label>
+                    <input type="number" id="prepFeeInput" class="rounded py-1.5 px-2 text-sm w-20 text-white"
+                        value="0.50" step="0.05" style="background:#0d1117;border:1px solid #30363d">
+                </div>
+
+                <div class="w-px h-8" style="background:#30363d"></div>
+
+                <!-- Buttons -->
+                <button id="processBtn" disabled
+                    class="bg-green-500 hover:bg-green-600 disabled:opacity-40 disabled:cursor-not-allowed text-white text-sm font-bold py-2 px-5 rounded-lg shadow transition-all flex items-center gap-2 whitespace-nowrap">
+                    <svg class="hidden animate-spin h-4 w-4 text-white" id="spinner" xmlns="http://www.w3.org/2000/svg"
+                        fill="none" viewBox="0 0 24 24">
+                        <circle class="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" stroke-width="4">
+                        </circle>
+                        <path class="opacity-75" fill="currentColor"
+                            d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z">
+                        </path>
+                    </svg>
+                    Start Processing
+                </button>
+                <button id="stopBtn"
+                    class="hidden bg-red-500 hover:bg-red-600 text-white text-sm font-bold py-2 px-4 rounded-lg shadow transition-all flex items-center gap-2">
+                    <svg class="h-4 w-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2"
+                            d="M10 14l2-2m0 0l2-2m-2 2l-2-2m2 2l2 2m7-2a9 9 0 11-18 0 9 9 0 0118 0z"></path>
+                    </svg>
+                    Stop
+                </button>
+
+                <!-- Status -->
+                <div id="statusText" class="text-xs font-semibold ml-auto" style="color:#58a6ff"></div>
+            </div>
+        </div>
+    </div>
+
+    <div id="resultsBlock" class="hidden">
+        <div class="flex justify-between items-center mb-4">
+            <h2 class="text-xl font-bold text-white">🏆 Profitable Items</h2>
+            <button id="exportBtn"
+                class="bg-blue-600 hover:bg-blue-700 text-white font-semibold py-2 px-4 rounded shadow transition-colors flex items-center gap-2 text-sm">
+                <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"
+                    xmlns="http://www.w3.org/2000/svg">
+                    <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2"
+                        d="M4 16v1a3 3 0 003 3h10a3 3 0 003-3v-1m-4-4l-4 4m0 0l-4-4m4 4V4"></path>
+                </svg>
+                Export Selected
+            </button>
+        </div>
+        <div class="table-wrap overflow-x-auto mb-8">
+            <table class="w-full text-left border-collapse" style="border-spacing:0">
+                <thead>
+                    <tr style="background:#0d1117;color:#8b949e">
+                        <th class="px-3 py-3 text-xs font-semibold align-top w-12 text-center uppercase tracking-wider">
+                            <input type="checkbox" id="selectAllCheckbox" class="w-4 h-4 rounded cursor-pointer"
+                                style="accent-color:#58a6ff">
+                        </th>
+                        <th class="px-3 py-3 text-xs font-semibold align-top uppercase tracking-wider">UPC<br><input
+                                type="text" data-col="1"
+                                class="filter-input w-full mt-2 p-1 text-xs rounded font-normal"
+                                placeholder="Filter..."></th>
+                        <th class="px-3 py-3 text-xs font-semibold align-top uppercase tracking-wider">Item#<br><input
+                                type="text" data-col="2"
+                                class="filter-input w-full mt-2 p-1 text-xs rounded font-normal"
+                                placeholder="Filter..."></th>
+                        <th class="px-3 py-3 text-xs font-semibold align-top uppercase tracking-wider">ASIN<br><input
+                                type="text" data-col="3"
+                                class="filter-input w-full mt-2 p-1 text-xs rounded font-normal"
+                                placeholder="Filter..."></th>
+                        <th class="px-3 py-3 text-xs font-semibold align-top uppercase tracking-wider">Var<br><input
+                                type="text" data-col="4"
+                                class="filter-input w-full mt-2 p-1 text-xs rounded font-normal" placeholder="..."></th>
+                        <th class="px-3 py-3 text-xs font-semibold align-top uppercase tracking-wider w-1/5">
+                            Title<br><input type="text" data-col="5"
+                                class="filter-input w-full mt-2 p-1 text-xs rounded font-normal"
+                                placeholder="Search..."></th>
+                        <th class="px-3 py-3 text-xs font-semibold align-top uppercase tracking-wider">Cost<br><input
+                                type="text" data-col="6"
+                                class="filter-input w-full mt-2 p-1 text-xs rounded font-normal" placeholder="&lt; 50">
+                        </th>
+                        <th class="px-3 py-3 text-xs font-semibold align-top uppercase tracking-wider">BSR<br><input
+                                type="text" data-col="7"
+                                class="filter-input w-full mt-2 p-1 text-xs rounded font-normal"
+                                placeholder="&lt; 100k"></th>
+                        <th class="px-3 py-3 text-xs font-semibold align-top uppercase tracking-wider relative">
+                            Risk<br>
+                            <select data-col="8" class="filter-input w-full mt-2 p-1 text-[10px] rounded font-normal">
+                                <option value="">All</option>
+                                <option value="Clear">Clear (Hide Blocked)</option>
+                                <option value="Restricted">Restricted</option>
+                            </select>
+                        </th>
+                        <th class="px-3 py-3 text-xs font-semibold align-top uppercase tracking-wider">Rating<br><input
+                                type="text" data-col="9"
+                                class="filter-input w-full mt-2 p-1 text-xs rounded font-normal" placeholder="&gt; 4.0">
+                        </th>
+                        <th class="px-3 py-3 text-xs font-semibold align-top uppercase tracking-wider">Reviews<br><input
+                                type="text" data-col="10"
+                                class="filter-input w-full mt-2 p-1 text-xs rounded font-normal" placeholder="&gt; 5">
+                        </th>
+                        <th class="px-3 py-3 text-xs font-semibold align-top uppercase tracking-wider">Drops<br><input
+                                type="text" data-col="11"
+                                class="filter-input w-full mt-2 p-1 text-xs rounded font-normal" placeholder="&gt; 10">
+                        </th>
+                        <th class="px-3 py-3 text-xs font-semibold align-top uppercase tracking-wider">Sellers<br><input
+                                type="text" data-col="12"
+                                class="filter-input w-full mt-2 p-1 text-xs rounded font-normal" placeholder="&lt; 10">
+                        </th>
+                        <th class="px-3 py-3 text-xs font-semibold align-top uppercase tracking-wider relative">
+                            Strategy<br>
+                            <div class="relative w-full mt-2" id="strategy-filter-container">
+                                <div onclick="toggleStrategyDropdown(event)"
+                                    class="cursor-pointer p-1 text-xs rounded font-normal flex justify-between items-center h-[26px]"
+                                    style="background:#21262d;border:1px solid #30363d;color:#c9d1d9">
+                                    <span id="strategy-filter-text" class="truncate max-w-[80px]">All</span>
+                                    <svg class="w-3 h-3" fill="none" stroke="currentColor" viewBox="0 0 24 24"
+                                        style="color:#8b949e">
+                                        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2"
+                                            d="M19 9l-7 7-7-7"></path>
+                                    </svg>
+                                </div>
+                                <div id="strategy-dropdown"
+                                    class="hidden absolute z-50 w-48 mt-1 rounded-md shadow-lg p-2 flex flex-col gap-1 text-left text-xs font-normal right-0"
+                                    style="background:#21262d;border:1px solid #30363d">
+                                    <label class="flex items-center gap-2 cursor-pointer p-1.5 rounded"
+                                        style="color:#c9d1d9" onmouseover="this.style.background='#2d333b'"
+                                        onmouseout="this.style.background=''"><input type="checkbox"
+                                            onchange="toggleAllStrategies(this)" class="w-3 h-3 rounded"
+                                            style="accent-color:#58a6ff"><span class="font-bold">Select
+                                            All</span></label>
+                                    <hr style="border-color:#30363d">
+                                    <label class="flex items-center gap-2 cursor-pointer p-1.5 rounded"
+                                        style="color:#c9d1d9" onmouseover="this.style.background='#2d333b'"
+                                        onmouseout="this.style.background=''"><input type="checkbox" value="Amz"
+                                            class="strategy-cb w-3 h-3 rounded" style="accent-color:#58a6ff"
+                                            onchange="updateStrategyFilter()"><span>Amazon</span></label>
+                                    <label class="flex items-center gap-2 cursor-pointer p-1.5 rounded"
+                                        style="color:#c9d1d9" onmouseover="this.style.background='#2d333b'"
+                                        onmouseout="this.style.background=''"><input type="checkbox" value="FBA"
+                                            class="strategy-cb w-3 h-3 rounded" style="accent-color:#58a6ff"
+                                            onchange="updateStrategyFilter()"><span>FBA (Non-Amz)</span></label>
+                                    <label class="flex items-center gap-2 cursor-pointer p-1.5 rounded"
+                                        style="color:#c9d1d9" onmouseover="this.style.background='#2d333b'"
+                                        onmouseout="this.style.background=''"><input type="checkbox" value="FBM"
+                                            class="strategy-cb w-3 h-3 rounded" style="accent-color:#58a6ff"
+                                            onchange="updateStrategyFilter()"><span>FBM</span></label>
+                                    <label class="flex items-center gap-2 cursor-pointer p-1.5 rounded"
+                                        style="color:#c9d1d9" onmouseover="this.style.background='#2d333b'"
+                                        onmouseout="this.style.background=''"><input type="checkbox" value="unavailable"
+                                            class="strategy-cb w-3 h-3 rounded" style="accent-color:#58a6ff"
+                                            onchange="updateStrategyFilter()"><span>Unavailable (OOS)</span></label>
+                                </div>
+                                <input type="hidden" data-col="13" class="filter-input" id="strategy-hidden-input"
+                                    value="">
+                            </div>
+                        </th>
+                        <th class="px-3 py-3 text-xs font-semibold align-top uppercase tracking-wider">Target<br><input
+                                type="text" data-col="14"
+                                class="filter-input w-full mt-2 p-1 text-xs rounded font-normal" placeholder="&gt; 20">
+                        </th>
+                        <th class="px-3 py-3 text-xs font-semibold align-top uppercase tracking-wider">Avg 30d<br><input
+                                type="text" data-col="15"
+                                class="filter-input w-full mt-2 p-1 text-xs rounded font-normal" placeholder="&lt; 30">
+                        </th>
+                        <th class="px-3 py-3 text-xs font-semibold align-top uppercase tracking-wider">Profit<br><input
+                                type="text" data-col="16"
+                                class="filter-input w-full mt-2 p-1 text-xs rounded font-normal" placeholder="&gt; 2">
+                        </th>
+                        <th class="px-3 py-3 text-xs font-semibold align-top uppercase tracking-wider">ROI %<br><input
+                                type="text" data-col="17"
+                                class="filter-input w-full mt-2 p-1 text-xs rounded font-normal" placeholder="&gt; 30">
+                        </th>
+                        <th class="px-3 py-3 text-xs font-semibold uppercase tracking-wider text-center">Action</th>
+                    </tr>
+                </thead>
+                <tbody id="profTable"></tbody>
+            </table>
+        </div>
+
+        <div class="flex justify-between items-center mb-4 mt-8">
+            <h2 class="text-xl font-bold" style="color:#f85149">⚠️ Problematic / Ignored</h2>
+            <button id="exportProblematicBtn"
+                class="bg-gray-800 text-white px-4 py-2 rounded shadow text-sm font-bold flex gap-2 items-center hover:bg-gray-700 transition-colors">
+                <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"
+                    xmlns="http://www.w3.org/2000/svg">
+                    <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2"
+                        d="M4 16v1a3 3 0 003 3h10a3 3 0 003-3v-1m-4-4l-4 4m0 0l-4-4m4 4V4"></path>
+                </svg>
+                Export Errors CSV
+            </button>
+        </div>
+        <div class="table-wrap overflow-x-auto opacity-80">
+            <table class="w-full text-left border-collapse">
+                <thead>
+                    <tr style="background:#0d1117;color:#8b949e;border-bottom:1px solid #30363d">
+                        <th class="px-4 py-3 text-xs font-semibold uppercase tracking-wider">UPC</th>
+                        <th class="px-4 py-3 text-xs font-semibold uppercase tracking-wider">Cost</th>
+                        <th class="px-4 py-3 text-xs font-semibold uppercase tracking-wider">Reason</th>
+                    </tr>
+                </thead>
+                <tbody id="errorTable"></tbody>
+            </table>
+        </div>
+    </div>
+
+    </div>
+
+    <script>
+        // URL ВАШЕГО FIREBASE WEBHOOK
+        const FIREBASE_API_URL = "https://us-central1-tradekit-automation-5fcdd.cloudfunctions.net/analyzePriceList";
+        const fileInput = document.getElementById('csvFile');
+        const fileInfo = document.getElementById('fileInfo');
+        const processBtn = document.getElementById('processBtn');
+        const stopBtn = document.getElementById('stopBtn');
+        const spinner = document.getElementById('spinner');
+        const statusText = document.getElementById('statusText');
+        const resultsBlock = document.getElementById('resultsBlock');
+        const profTable = document.getElementById('profTable');
+        const errorTable = document.getElementById('errorTable');
+
+        let pendingItems = [];
+        let isProcessingCanceled = false;
+
+        // Variation state
+        let variationGroups = {};
+        let variationCounter = 1;
+
+        stopBtn.addEventListener('click', () => {
+            isProcessingCanceled = true;
+            stopBtn.disabled = true;
+            statusText.innerText = "Processing cancellation requested... waiting for current batch to finish.";
+        });
+
+        fileInput.addEventListener('change', async (e) => {
+            const file = e.target.files[0];
+            if (!file) return;
+
+            fileInfo.innerText = file.name;
+            statusText.innerText = "Parsing file locally (Smart Detection)...";
+            processBtn.disabled = true;
+
+            try {
+                const ext = file.name.split('.').pop().toLowerCase();
+                let rows = [];
+
+                // Reset variations on new file
+                variationGroups = {};
+                variationCounter = 1;
+
+                if (ext === 'csv') {
+                    // Parse CSV as 2D array
+                    rows = await new Promise((resolve) => {
+                        Papa.parse(file, {
+                            header: false,
+                            skipEmptyLines: true,
+                            complete: function (results) { resolve(results.data); }
+                        });
+                    });
+                } else if (ext === 'xlsx' || ext === 'xls') {
+                    // Parse Excel as 2D array
+                    rows = await new Promise((resolve, reject) => {
+                        const reader = new FileReader();
+                        reader.onload = function (e) {
+                            try {
+                                const data = new Uint8Array(e.target.result);
+                                const workbook = XLSX.read(data, { type: 'array' });
+                                const firstSheet = workbook.Sheets[workbook.SheetNames[0]];
+                                const json = XLSX.utils.sheet_to_json(firstSheet, { header: 1, defval: '' });
+                                resolve(json);
+                            } catch (err) { reject(err); }
+                        };
+                        reader.readAsArrayBuffer(file);
+                    });
+                } else {
+                    throw new Error("Unsupported file format.");
+                }
+
+                // --- SMART COLUMN DETECTION ALGORITHM ---
+                let headerRowIndex = -1;
+                let colMapping = { upc: -1, cost: -1, itemNumber: -1 };
+
+                const upcKeywords = ['upc', 'barcode', 'ean', 'gtin', 'each upc'];
+                const costKeywords = ['cost', 'price', 'ea price', 'unit price'];
+                const itemNumKeywords = ['item number', 'item', 'sku', 'part number', 'model'];
+
+                // Scan rows to find the one that looks like a header (has both UPC and Cost)
+                for (let i = 0; i < Math.min(rows.length, 50); i++) { // search in first 50 rows
+                    let row = rows[i];
+                    if (!row || !Array.isArray(row)) continue;
+
+                    let foundUpcStr = -1;
+                    let foundCostStr = -1;
+                    let foundItemNumStr = -1;
+
+                    for (let c = 0; c < row.length; c++) {
+                        const cellVal = String(row[c] || '').toLowerCase().trim();
+                        if (!cellVal) continue;
+
+                        if (foundUpcStr === -1 && upcKeywords.some(k => cellVal.includes(k))) foundUpcStr = c;
+                        else if (foundCostStr === -1 && costKeywords.some(k => cellVal.includes(k))) foundCostStr = c;
+                        else if (foundItemNumStr === -1 && itemNumKeywords.some(k => cellVal.includes(k))) foundItemNumStr = c;
+                    }
+
+                    if (foundUpcStr !== -1 && foundCostStr !== -1) {
+                        headerRowIndex = i;
+                        colMapping.upc = foundUpcStr;
+                        colMapping.cost = foundCostStr;
+                        colMapping.itemNumber = foundItemNumStr;
+                        break;
+                    }
+                }
+
+                if (headerRowIndex === -1) {
+                    throw new Error("Could not detect 'UPC' and 'Cost' columns automatically. Make sure the file has clear headers.");
+                }
+
+                pendingItems = [];
+                // Process data rows after the header
+                for (let i = headerRowIndex + 1; i < rows.length; i++) {
+                    const row = rows[i];
+                    if (!row || !Array.isArray(row)) continue;
+
+                    const rawUpc = String(row[colMapping.upc] || '').trim();
+                    const rawCost = String(row[colMapping.cost] || '').trim();
+                    const rawItemNum = colMapping.itemNumber !== -1 ? String(row[colMapping.itemNumber] || '').trim() : '';
+
+                    if (!rawUpc && !rawCost) continue; // skip entirely empty detected rows
+
+                    // Parse Cost strictly
+                    let cleanStr = rawCost.replace(/[^0-9.,-]/g, '');
+                    if (cleanStr.includes(',') && !cleanStr.includes('.')) {
+                        cleanStr = cleanStr.replace(/,/g, '.');
+                    } else if (cleanStr.includes(',') && cleanStr.includes('.')) {
+                        if (cleanStr.lastIndexOf(',') > cleanStr.lastIndexOf('.')) {
+                            cleanStr = cleanStr.replace(/\./g, '').replace(',', '.');
+                        } else {
+                            cleanStr = cleanStr.replace(/,/g, '');
+                        }
+                    }
+                    const cost = parseFloat(cleanStr) || 0;
+
+                    pendingItems.push({
+                        itemNumber: rawItemNum,
+                        upc: rawUpc,
+                        cost: cost
+                    });
+                }
+
+                statusText.innerText = `Found ${pendingItems.length} items to process in the file. Ready to send!`;
+                processBtn.disabled = false;
+
+            } catch (err) {
+                statusText.innerText = `Parsing Error: ${err.message}`;
+            }
+        });
+
+        processBtn.addEventListener('click', async () => {
+            if (pendingItems.length === 0) return;
+
+            // UI States
+            isProcessingCanceled = false;
+            processBtn.disabled = true;
+            stopBtn.classList.remove('hidden');
+            stopBtn.disabled = false;
+            spinner.classList.remove('hidden');
+            statusText.innerText = `Sending ${pendingItems.length} items to Firebase... Please wait.`;
+            resultsBlock.classList.add('hidden');
+            profTable.innerHTML = '';
+            errorTable.innerHTML = '';
+
+            try {
+                const prepFeeVal = parseFloat(document.getElementById('prepFeeInput').value) || 0;
+
+                let blacklist = []; // Backend will fetch Google sheets automatically
+
+                resultsBlock.classList.remove('hidden');
+
+                const BATCH_SIZE = 30;
+                let totalProcessed = 0;
+
+                for (let i = 0; i < pendingItems.length; i += BATCH_SIZE) {
+                    if (isProcessingCanceled) {
+                        statusText.innerText = `Processing stopped by user. Total processed: ${totalProcessed} items.`;
+                        break;
+                    }
+
+                    const batch = pendingItems.slice(i, i + BATCH_SIZE);
+                    const batchNum = Math.floor(i / BATCH_SIZE) + 1;
+                    const totalBatches = Math.ceil(pendingItems.length / BATCH_SIZE);
+
+                    statusText.innerText = `Sending batch ${batchNum} of ${totalBatches} (${batch.length} items) to Firebase... Please wait.`;
+
+                    const response = await fetch(FIREBASE_API_URL, {
+                        method: 'POST',
+                        headers: { 'Content-Type': 'application/json' },
+                        body: JSON.stringify({ items: batch, prepFee: prepFeeVal, blacklist })
+                    });
+
+                    if (!response.ok) {
+                        throw new Error(`Firebase Error on batch ${batchNum}: ${response.statusText}`);
+                    }
+
+                    const data = await response.json();
+                    totalProcessed += data.stats.total;
+
+                    // Render results incrementally
+                    renderResults(data.results.profitable, data.results.problematic);
+
+                    if (isProcessingCanceled) break;
+
+                    // Add a tiny pause between requests to let the UI refresh and Firebase cool down
+                    if (batchNum < totalBatches) {
+                        statusText.innerText = `Batch ${batchNum} completed. Pausing 3 seconds...`;
+                        let pauseCounter = 0;
+                        while (pauseCounter < 30) {
+                            if (isProcessingCanceled) break;
+                            await new Promise(r => setTimeout(r, 100));
+                            pauseCounter++;
+                        }
+                    }
+                }
+
+                if (!isProcessingCanceled) {
+                    statusText.innerText = `Done! Processed all ${totalProcessed} items successfully.`;
+                }
+
+            } catch (err) {
+                statusText.innerText = `Error: ${err.message}`;
+            } finally {
+                spinner.classList.add('hidden');
+                stopBtn.classList.add('hidden');
+                processBtn.disabled = false;
+            }
+        });
+
+        function renderResults(profitable, problematic) {
+            profitable.forEach(item => {
+                const tr = document.createElement('tr');
+                tr.className = 'border-b hover:bg-gray-50';
+
+                // Variation Logic
+                let varLabel = '';
+                let varExport = '';
+                if (item.ParentASIN) {
+                    if (!variationGroups[item.ParentASIN]) {
+                        variationGroups[item.ParentASIN] = `Var ${variationCounter++}`;
+                    }
+                    varExport = variationGroups[item.ParentASIN];
+                    varLabel = `<span class="bg-purple-100 text-purple-800 text-[10px] font-bold px-2 py-1 rounded shadow-sm whitespace-nowrap">${varExport}</span>`;
+                }
+
+                // Keep data on element for export
+                tr.dataset.itemnumber = item.ItemNumber || '';
+                tr.dataset.upc = item.UPC;
+                tr.dataset.asin = item.ASIN;
+                tr.dataset.variation = varExport;
+                tr.dataset.title = item.Title;
+                tr.dataset.cost = item.Cost;
+                tr.dataset.offers = item.OffersCount;
+                tr.dataset.brand = item.Brand || 'N/A';
+                tr.dataset.brandRisk = item.BrandRisk || 'Clear';
+                tr.dataset.rating = item.KeepaRating || 'N/A';
+                tr.dataset.reviews = item.KeepaReviews || 'N/A';
+                tr.dataset.drops = item.KeepaDrops || 'N/A';
+                tr.dataset.avg30 = item.KeepaAvg30 || 'N/A';
+                tr.dataset.strategy = item.Strategy;
+                tr.dataset.price = item.CalcPrice;
+                tr.dataset.profit = item.NetProfit;
+                tr.dataset.roi = item.ROI;
+
+                let bsrDropHtml = '';
+                let offersHtml = `<span style="color:#c9d1d9" class="font-bold">${item.OffersCount}</span>`;
+                let keepaRatingHtml = `<span style="color:#484f58" class="text-xs">No Key</span>`;
+                let keepaDropsHtml = `<span style="color:#484f58" class="text-xs">-</span>`;
+                let reviewsVal = item.KeepaReviews !== undefined && item.KeepaReviews !== 'No Key' && item.KeepaReviews !== 'N/A' && item.KeepaReviews !== null ? item.KeepaReviews : '-';
+
+                // ROI tier border
+                const roiNum = parseFloat(item.ROI);
+                if (!isNaN(roiNum)) {
+                    if (roiNum >= 30) tr.classList.add('roi-hot');
+                    else if (roiNum >= 15) tr.classList.add('roi-mid');
+                    else tr.classList.add('roi-low');
+                }
+
+                // BSR Drop badge
+                if (item.BSRDrop === '🔥 Hot') bsrDropHtml = `<span class="badge badge-hot">${item.BSRDrop}</span>`;
+                else if (item.BSRDrop === '✅ Good') bsrDropHtml = `<span class="badge badge-good">${item.BSRDrop}</span>`;
+                else if (item.BSRDrop === '🛑 Slow') bsrDropHtml = `<span class="badge badge-slow">${item.BSRDrop}</span>`;
+
+                // Offers
+                if (item.OffersCount < 3) offersHtml = `<span style="color:#f85149" class="font-bold" title="Low competition">${item.OffersCount} ⚠️</span>`;
+
+                // Rating / Drops
+                if (item.KeepaRating !== undefined && item.KeepaRating !== 'No Key' && item.KeepaRating !== null) {
+                    const rN = parseFloat(item.KeepaRating);
+                    keepaRatingHtml = `<span style="color:${isNaN(rN) ? '#8b949e' : (rN < 3.5 ? '#f85149' : '#d29922')};font-weight:700">${item.KeepaRating} ⭐</span>`;
+                    keepaDropsHtml = `<span style="color:#58a6ff;font-weight:600">${item.KeepaDrops}</span>`;
+                }
+
+                const keepaAvg30Html = item.KeepaAvg30 !== 'N/A' && item.KeepaAvg30 !== 'No Key'
+                    ? `<span style="color:#58a6ff;font-weight:600">$${item.KeepaAvg30}</span>`
+                    : `<span style="color:#484f58" class="text-xs">${item.KeepaAvg30}</span>`;
+                const keepaReviewsHtml = `<span style="color:${reviewsVal !== '-' ? '#79c0ff' : '#484f58'};font-weight:600">${reviewsVal}</span>`;
+
+                const profitHtml = item.Strategy === 'Currently unavailable'
+                    ? `<span style="color:#484f58" class="font-bold">-</span>`
+                    : `<span style="color:#3fb950;font-weight:700">+$${item.NetProfit}</span>`;
+                const roiHtml = item.Strategy === 'Currently unavailable'
+                    ? `<span style="color:#484f58" class="font-bold">-</span>`
+                    : `<span style="color:#3fb950;font-weight:700">${item.ROI}%</span>`;
+
+                const brandRiskHtml = item.BrandRisk === 'Restricted'
+                    ? `<span class="badge badge-blocked">🔒 Restricted</span>`
+                    : `<span class="badge badge-clear">✓ Clear</span>`;
+
+                const strat = item.Strategy || '';
+                let stratBadge;
+                if (strat.includes('Amz') || strat.includes('Amazon')) stratBadge = `<span class="badge badge-amazon">🛒 Amazon</span>`;
+                else if (strat.includes('FBA')) stratBadge = `<span class="badge badge-fba">FBA</span>`;
+                else if (strat.includes('FBM')) stratBadge = `<span class="badge badge-fbm">FBM</span>`;
+                else stratBadge = `<span class="badge badge-oos">OOS</span>`;
+
+                const td = 'style="border-bottom:1px solid #21262d;color:#c9d1d9"';
+
+                tr.innerHTML = `
+                    <td class="px-3 py-3 text-center" ${td}>
+                        <input type="checkbox" class="item-checkbox w-4 h-4 rounded cursor-pointer" style="accent-color:#58a6ff">
+                    </td>
+                    <td class="px-3 py-3 font-mono text-xs" style="border-bottom:1px solid #21262d;color:#8b949e">${item.UPC}</td>
+                    <td class="px-3 py-3 text-xs" style="border-bottom:1px solid #21262d;color:#8b949e">${item.ItemNumber || ''}</td>
+                    <td class="px-3 py-3 text-sm font-bold" ${td}>
+                        <a href="https://amazon.com/dp/${item.ASIN}" target="_blank" style="color:#58a6ff" class="hover:underline">${item.ASIN}</a>
+                    </td>
+                    <td class="px-3 py-3 text-center text-xs" ${td}>${varLabel}</td>
+                    <td class="px-3 py-3 text-xs truncate max-w-xs" style="border-bottom:1px solid #21262d;color:#e6edf3" title="${item.Title.replace(/"/g, '&quot;')}">${item.Title}</td>
+                    <td class="px-3 py-3 font-bold" style="border-bottom:1px solid #21262d;color:#e6edf3">$${item.Cost}</td>
+                    <td class="px-3 py-3 text-xs" ${td}>
+                        <div class="flex items-center gap-1 flex-wrap">
+                            <span style="color:#c9d1d9;font-weight:600">${item.BSR}</span> ${bsrDropHtml}
+                        </div>
+                        <div style="color:#484f58;font-size:9px" class="mt-0.5">${item.Category || ''}</div>
+                        <div class="truncate w-20" style="color:#484f58;font-size:9px" title="${item.Brand || ''}">${item.Brand || ''}</div>
+                    </td>
+                    <td class="px-3 py-3 text-center" ${td}>
+                        <div class="hidden">${item.BrandRisk}</div>
+                        ${brandRiskHtml}
+                    </td>
+                    <td class="px-3 py-3 text-center" ${td}>${keepaRatingHtml}</td>
+                    <td class="px-3 py-3 text-center" ${td}>${keepaReviewsHtml}</td>
+                    <td class="px-3 py-3 text-center" ${td}>${keepaDropsHtml}</td>
+                    <td class="px-3 py-3 text-center" ${td}>${offersHtml}</td>
+                    <td class="px-3 py-3" ${td}>${stratBadge}</td>
+                    <td class="px-3 py-3 font-bold" style="border-bottom:1px solid #21262d;color:#e6edf3">$${item.CalcPrice}</td>
+                    <td class="px-3 py-3 text-center" ${td}>${keepaAvg30Html}</td>
+                    <td class="px-3 py-3" ${td}>${profitHtml}</td>
+                    <td class="px-3 py-3" ${td}>${roiHtml}</td>
+                    <td class="px-3 py-3 text-center" ${td}>
+                        <button onclick="discardItem(this)" style="color:#f85149;background:rgba(248,81,73,0.1);border:1px solid rgba(248,81,73,0.2)" class="p-1.5 rounded transition-all hover:opacity-80" title="Discard Item">
+                            <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M6 18L18 6M6 6l12 12"></path></svg>
+                        </button>
+                    </td>
+                `;
+                profTable.appendChild(tr);
+            });
+
+            problematic.forEach(item => {
+                errorTable.innerHTML += `
+                    <tr data-upc="${item.UPC || 'N/A'}" data-cost="${item.Cost}" data-problem="${item.Problem}" style="border-bottom:1px solid #21262d">
+                        <td class="px-4 py-3 font-mono text-xs" style="color:#8b949e">${item.UPC || 'N/A'}</td>
+                        <td class="px-4 py-3 text-sm" style="color:#c9d1d9">$${item.Cost}</td>
+                        <td class="px-4 py-3 text-sm font-medium" style="color:#f85149">${item.Problem}</td>
+                    </tr>
+                `;
+            });
+        }
+
+        // ==========================================
+        // ACTION BUTTONS (Discard)
+        // ==========================================
+        window.discardItem = function (btn) {
+            const tr = btn.closest('tr');
+            const upc = tr.dataset.upc || 'N/A';
+            const cost = tr.dataset.cost || '0';
+
+            // Remove from Profitable
+            tr.remove();
+
+            // Add to Problematic
+            const errorTable = document.getElementById('errorTable');
+            errorTable.innerHTML += `
+                <tr class="border-b hover:bg-gray-50 bg-red-50/20" data-upc="${upc}" data-cost="${cost}" data-problem="Manually Ignored">
+                    <td class="p-4 font-mono text-sm">${upc}</td>
+                    <td class="p-4 text-sm">$${cost}</td>
+                    <td class="p-4 text-red-600 text-sm font-medium">Manually Ignored ❌</td>
+                </tr>
+            `;
+        }
+
+        // ==========================================
+        // FILTERING LOGIC
+        // ==========================================
+        document.querySelectorAll('.filter-input').forEach(input => {
+            input.addEventListener('input', filterTable);
+            input.addEventListener('change', filterTable);
+        });
+
+        function filterTable() {
+            const trs = profTable.querySelectorAll('tr');
+            const filters = Array.from(document.querySelectorAll('.filter-input')).map(input => ({
+                text: input.value.trim().toLowerCase(),
+                colIndex: parseInt(input.dataset.col)
+            }));
+
+            trs.forEach(tr => {
+                const tds = Array.from(tr.querySelectorAll('td'));
+                let show = true;
+
+                filters.forEach(filter => {
+                    let filterText = filter.text;
+                    if (!filterText) return; // ignore empty filters
+                    const td = tds[filter.colIndex];
+                    if (!td) return;
+
+                    const cellText = td.innerText.toLowerCase();
+
+                    // Numeric filtering logic for numeric columns 
+                    // (Cost=6, BSR=7, Rating=9, Reviews=10, Drops=11, Sellers=12, Targets=14, Avg30=15, Profit=16, ROI=17)
+                    if ([6, 7, 9, 10, 11, 12, 14, 15, 16, 17].includes(filter.colIndex)) {
+                        let isLessThan = filterText.startsWith('<');
+                        let isGreaterThan = filterText.startsWith('>');
+
+                        if (isLessThan || isGreaterThan) {
+                            let operatorFreeText = filterText.replace(/[<>\s]/g, '');
+                            if (operatorFreeText === '') return; // " > " typed but no number yet
+
+                            let filterVal = parseFloat(operatorFreeText);
+                            if (isNaN(filterVal)) return;
+
+                            // Extract the actual numeric value from the table cell (stripping $, +, , etc)
+                            // Note: BSR cell format includes "\n" and Category name, we must parse only the first line/number.
+                            let cellValStr = cellText.split('\n')[0].replace(/[^0-9.-]/g, '');
+
+                            // If the item has a dash (e.g. OOS items with no calculatable ROI), 
+                            // we skip the numerical bounds check so they always remain visible for review
+                            if (cellValStr.trim() === '-' || cellText.trim() === '-') {
+                                return; // do not hide this row for this column
+                            }
+
+                            let cellVal = parseFloat(cellValStr) || 0;
+
+                            if (isLessThan && cellVal >= filterVal) show = false;
+                            if (isGreaterThan && cellVal <= filterVal) show = false;
+                            return;
+                        }
+                    }
+
+                    // Default text matching mapping: allowing multiple OR filters separated by commas (e.g. "FBA, FBM")
+                    const searchTerms = filterText.split(',').map(t => t.trim()).filter(t => t.length > 0);
+                    if (searchTerms.length > 0) {
+                        let matchFound = false;
+                        for (let term of searchTerms) {
+                            if (cellText.includes(term)) {
+                                matchFound = true;
+                                break;
+                            }
+                        }
+                        if (!matchFound) {
+                            show = false;
+                        }
+                    }
+                });
+
+                tr.style.display = show ? '' : 'none';
+            });
+
+            // Uncheck "select all" when filtering changes
+            document.getElementById('selectAllCheckbox').checked = false;
+        }
+
+        // ==========================================
+        // EXPORT LOGIC
+        // ==========================================
+        const selectAllCheckbox = document.getElementById('selectAllCheckbox');
+        const exportBtn = document.getElementById('exportBtn');
+
+        selectAllCheckbox.addEventListener('change', (e) => {
+            const isChecked = e.target.checked;
+            const visibleCheckboxes = profTable.querySelectorAll('tr:not([style*="display: none"]) .item-checkbox');
+            visibleCheckboxes.forEach(cb => cb.checked = isChecked);
+        });
+
+        const exportProblematicBtn = document.getElementById('exportProblematicBtn');
+
+        exportProblematicBtn.addEventListener('click', () => {
+            const rows = Array.from(errorTable.querySelectorAll('tr'));
+            if (rows.length === 0) {
+                alert('No problematic items to export.');
+                return;
+            }
+
+            let csvContent = "UPC,Cost,Reason\n";
+            rows.forEach(tr => {
+                const upc = tr.dataset.upc;
+                const cost = tr.dataset.cost;
+                const problem = `"${(tr.dataset.problem || '').replace(/"/g, '""')}"`;
+                csvContent += `${upc},${cost},${problem}\n`;
+            });
+
+            const blob = new Blob([csvContent], { type: 'text/csv;charset=utf-8;' });
+            const url = URL.createObjectURL(blob);
+            const link = document.createElement("a");
+            link.setAttribute("href", url);
+            link.setAttribute("download", `Tradekit_Problematic_${new Date().toISOString().slice(0, 10)}.csv`);
+            document.body.appendChild(link);
+            link.click();
+            document.body.removeChild(link);
+        });
+
+        exportBtn.addEventListener('click', () => {
+            const visibleRows = Array.from(profTable.querySelectorAll('tr:not([style*="display: none"])'));
+            const checkedRows = visibleRows.filter(tr => tr.querySelector('.item-checkbox').checked);
+
+            if (checkedRows.length === 0) {
+                alert('Please select at least one item to export.');
+                return;
+            }
+
+            let csvContent = "UPC,Item Number,ASIN,Variation Family,Title,Brand,Brand Risk,Cost,BSR,Keepa Rating,Keepa Reviews,Keepa Drops,Offers Count,Strategy,Target Price,Avg 30d,Net Profit,ROI%\n";
+
+            checkedRows.forEach(tr => {
+                const upc = tr.dataset.upc;
+                const itemNumber = `"${tr.dataset.itemnumber || ''}"`;
+                const asin = tr.dataset.asin;
+                const variation = `"${tr.dataset.variation || ''}"`;
+                const title = `"${(tr.dataset.title || '').replace(/"/g, '""')}"`;
+                const brand = `"${(tr.dataset.brand || '').replace(/"/g, '""')}"`;
+                const brandRisk = tr.dataset.brandRisk;
+                const cost = tr.dataset.cost;
+                const bsr = tr.dataset.bsr;
+                const rating = tr.dataset.rating;
+                const reviews = tr.dataset.reviews;
+                const drops = tr.dataset.drops;
+                const avg30 = tr.dataset.avg30;
+                const offersCount = tr.dataset.offers || '';
+                const strategy = tr.dataset.strategy;
+                const price = tr.dataset.price;
+                const profit = tr.dataset.profit;
+                const roi = tr.dataset.roi;
+
+                csvContent += `${upc},${itemNumber},${asin},${variation},${title},${brand},${brandRisk},${cost},${bsr},${rating},${reviews},${drops},${offersCount},${strategy},${price},${avg30},${profit},${roi}\n`;
+            });
+
+            // Trigger File Download
+            const blob = new Blob([csvContent], { type: 'text/csv;charset=utf-8;' });
+            const url = URL.createObjectURL(blob);
+            const link = document.createElement("a");
+            link.setAttribute("href", url);
+            link.setAttribute("download", `Tradekit_Export_${new Date().toISOString().slice(0, 10)}.csv`);
+            document.body.appendChild(link);
+            link.click();
+            document.body.removeChild(link);
+        });
+
+        // ==========================================
+        // STRATEGY MULTI-SELECT DROPDOWN LOGIC
+        // ==========================================
+        window.toggleStrategyDropdown = function (event) {
+            if (event) event.stopPropagation();
+            const dropdown = document.getElementById('strategy-dropdown');
+            dropdown.classList.toggle('hidden');
+        };
+
+        document.addEventListener('click', function (event) {
+            const container = document.getElementById('strategy-filter-container');
+            const dropdown = document.getElementById('strategy-dropdown');
+            if (container && dropdown && !container.contains(event.target)) {
+                if (!dropdown.classList.contains('hidden')) {
+                    dropdown.classList.add('hidden');
+                }
+            }
+        });
+
+        window.toggleAllStrategies = function (allCb) {
+            const checkboxes = document.querySelectorAll('.strategy-cb');
+            checkboxes.forEach(cb => cb.checked = allCb.checked);
+            updateStrategyFilter();
+        };
+
+        window.updateStrategyFilter = function () {
+            const checkboxes = Array.from(document.querySelectorAll('.strategy-cb'));
+            const checked = checkboxes.filter(cb => cb.checked).map(cb => cb.value);
+
+            const allCb = document.querySelector('#strategy-dropdown input[onchange="toggleAllStrategies(this)"]');
+            if (allCb) allCb.checked = checked.length === checkboxes.length;
+
+            const span = document.getElementById('strategy-filter-text');
+            const hiddenInput = document.getElementById('strategy-hidden-input');
+
+            if (checked.length === 0 || checked.length === checkboxes.length) {
+                span.innerText = 'All';
+                hiddenInput.value = '';
+            } else {
+                span.innerText = checked.length + ' selected';
+                hiddenInput.value = checked.join(',');
+            }
+
+            // Trigger table filtering
+            hiddenInput.dispatchEvent(new Event('input', { bubbles: true }));
+        };
+    </script>
+</body>
+
+</html>

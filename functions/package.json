@@ -1,0 +1,18 @@
+{
+  "name": "amazon-reporter",
+  "version": "1.0.0",
+  "description": "Amazon SP-API Daily Reporter to Google Sheets",
+  "main": "index.js",
+  "engines": {
+    "node": "22"
+  },
+  "dependencies": {
+    "aws4": "^1.13.2",
+    "axios": "^1.13.5",
+    "dotenv": "^16.6.1",
+    "firebase-admin": "^13.6.1",
+    "firebase-functions": "^7.0.5",
+    "googleapis": "^129.0.0"
+  },
+  "private": true
+}

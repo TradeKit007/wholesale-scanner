@@ -1,0 +1,47 @@
+# Logs
+logs
+*.log
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+firebase-debug.log*
+firebase-debug.*.log*
+
+# Firebase cache
+.firebase/
+
+# Runtime data
+pids
+*.pid
+*.seed
+*.pid.lock
+
+# Dependency directories
+node_modules/
+
+# dotenv environment variables file
+.env
+functions/.env
+
+# Secrets / credentials
+credentials.json
+
+# Python scripts (local only)
+*.py
+
+# Debug and temp files
+debug_output*.txt
+results_*.csv
+structure_dump.json
+
+# System files
+.DS_Store
+*.tgz
+.npm
+.eslintcache
+.node_repl_history
+.yarn-integrity
+.dataconnect
+.nyc_output
+coverage/
+lib-cov/
