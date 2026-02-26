@@ -8,6 +8,9 @@
     <script src="https://cdn.tailwindcss.com"></script>
     <script src="https://cdnjs.cloudflare.com/ajax/libs/PapaParse/5.4.1/papaparse.min.js"></script>
     <script src="https://cdnjs.cloudflare.com/ajax/libs/xlsx/0.18.5/xlsx.full.min.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/tesseract.js@5/dist/tesseract.min.js"></script>
+    <script>window.pdfjsWorkerSrc = 'https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.worker.min.js';</script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.min.js"></script>
     <link rel="preconnect" href="https://fonts.googleapis.com">
     <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet">
     <style>
@@ -154,6 +157,84 @@
             background: #30363d;
             border-radius: 3px;
         }
+
+        /* ===== PDF COLUMN MAPPING MODAL ===== */
+        #colMappingOverlay {
+            position: fixed;
+            inset: 0;
+            background: rgba(0, 0, 0, 0.75);
+            z-index: 1000;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+        }
+
+        #colMappingBox {
+            background: #161b22;
+            border: 1px solid #30363d;
+            border-radius: 16px;
+            padding: 28px;
+            width: 92vw;
+            max-width: 1000px;
+            max-height: 88vh;
+            overflow-y: auto;
+            display: flex;
+            flex-direction: column;
+            gap: 20px;
+        }
+
+        .col-mapper-card {
+            background: #21262d;
+            border: 1px solid #30363d;
+            border-radius: 10px;
+            padding: 14px;
+            display: flex;
+            flex-direction: column;
+            gap: 8px;
+            min-width: 140px;
+        }
+
+        .col-mapper-card select {
+            background: #0d1117;
+            color: #c9d1d9;
+            border: 1px solid #30363d;
+            border-radius: 6px;
+            padding: 6px 8px;
+            font-size: 12px;
+            cursor: pointer;
+            outline: none;
+        }
+
+        .col-mapper-card select:focus {
+            border-color: #58a6ff;
+        }
+
+        .col-preview-val {
+            font-size: 10px;
+            color: #8b949e;
+            white-space: nowrap;
+            overflow: hidden;
+            text-overflow: ellipsis;
+            max-width: 140px;
+        }
+
+        #pdfProgressWrap {
+            background: #21262d;
+            border: 1px solid #30363d;
+            border-radius: 10px;
+            padding: 16px;
+            display: flex;
+            flex-direction: column;
+            gap: 8px;
+        }
+
+        #pdfProgressBar {
+            width: 0%;
+            height: 6px;
+            background: #58a6ff;
+            border-radius: 3px;
+            transition: width 0.3s ease;
+        }
     </style>
 </head>
 
@@ -168,7 +249,7 @@
 
                 <!-- File -->
                 <div class="flex items-center gap-2">
-                    <input type="file" id="csvFile" accept=".csv, .xls, .xlsx" class="hidden">
+                    <input type="file" id="csvFile" accept=".csv, .xls, .xlsx, .pdf" class="hidden">
                     <label for="csvFile"
                         class="cursor-pointer bg-blue-600 hover:bg-blue-700 text-white text-xs font-semibold py-2 px-4 rounded-lg shadow transition-colors whitespace-nowrap">
                         📂 Select File
@@ -211,6 +292,57 @@
 
                 <!-- Status -->
                 <div id="statusText" class="text-xs font-semibold ml-auto" style="color:#58a6ff"></div>
+            </div>
+        </div>
+    </div>
+
+    <!-- ===== PDF COLUMN MAPPING MODAL ===== -->
+    <div id="colMappingOverlay" class="hidden">
+        <div id="colMappingBox">
+            <div class="flex items-center justify-between">
+                <h2 class="text-lg font-bold text-white">📊 Map Your PDF Columns</h2>
+                <span id="pdfTypeTag" class="badge"
+                    style="background:#1F6FEB1A;color:#58a6ff;border:1px solid #1F6FEB44">text-based</span>
+            </div>
+            <p class="text-xs" style="color:#8b949e">Визнач що означає кожна колонка. Потрібна мінімум одна <strong
+                    style="color:#e6edf3">UPC</strong> та одна <strong style="color:#e6edf3">Cost</strong>.</p>
+
+            <!-- OCR Warning -->
+            <div id="ocrWarning" class="hidden rounded-lg px-4 py-3 text-xs font-semibold"
+                style="background:#d299221A;border:1px solid #d2992244;color:#d29922">
+                ⚠️ OCR accuracy: <span id="ocrAccuracy">-</span>% — низька точність може призвести до помилок. Перевірте
+                дані перед запуском.
+            </div>
+
+            <!-- Preview table -->
+            <div class="overflow-x-auto rounded-lg" style="border:1px solid #30363d">
+                <table id="pdfPreviewTable" class="w-full text-xs" style="border-collapse:collapse">
+                    <thead id="pdfPreviewHead"></thead>
+                    <tbody id="pdfPreviewBody"></tbody>
+                </table>
+            </div>
+
+            <!-- Column mappers -->
+            <div>
+                <div class="text-xs font-semibold mb-3" style="color:#8b949e">ПРИЗНАЧТЕ КОЛОНКИ:</div>
+                <div id="colMappers" class="flex gap-3 flex-wrap"></div>
+            </div>
+
+            <!-- Validation errors -->
+            <div id="mappingErrors" class="hidden rounded-lg px-4 py-3 text-xs"
+                style="background:#f851491A;border:1px solid #f8514944;color:#f85149"></div>
+
+            <!-- Confirm button -->
+            <div class="flex items-center gap-3 mt-2">
+                <button id="confirmMappingBtn"
+                    class="bg-green-500 hover:bg-green-600 text-white font-bold py-2 px-6 rounded-lg shadow transition-all text-sm">
+                    ✅ Confirm & Load Items
+                </button>
+                <button onclick="document.getElementById('colMappingOverlay').classList.add('hidden')"
+                    class="text-sm font-semibold" style="color:#8b949e">
+                    Cancel
+                </button>
+                <span id="mappingCount" class="text-xs ml-auto" style="color:#8b949e"></span>
             </div>
         </div>
     </div>
@@ -420,6 +552,12 @@
             statusText.innerText = "Parsing file locally (Smart Detection)...";
             processBtn.disabled = true;
 
+            const MAX_PDF_MB = 20;
+            if (file.size > MAX_PDF_MB * 1024 * 1024) {
+                statusText.innerText = `File too large. Max ${MAX_PDF_MB}MB allowed.`;
+                return;
+            }
+
             try {
                 const ext = file.name.split('.').pop().toLowerCase();
                 let rows = [];
@@ -428,8 +566,10 @@
                 variationGroups = {};
                 variationCounter = 1;
 
-                if (ext === 'csv') {
-                    // Parse CSV as 2D array
+                if (ext === 'pdf') {
+                    await handlePdfFile(file);
+                    return; // PDF opens column mapping modal — don't auto-detect
+                } else if (ext === 'csv') {
                     rows = await new Promise((resolve) => {
                         Papa.parse(file, {
                             header: false,
@@ -438,7 +578,6 @@
                         });
                     });
                 } else if (ext === 'xlsx' || ext === 'xls') {
-                    // Parse Excel as 2D array
                     rows = await new Promise((resolve, reject) => {
                         const reader = new FileReader();
                         reader.onload = function (e) {
@@ -453,87 +592,277 @@
                         reader.readAsArrayBuffer(file);
                     });
                 } else {
-                    throw new Error("Unsupported file format.");
+                    throw new Error("Unsupported format. Use CSV, Excel (.xlsx/.xls), or PDF.");
                 }
 
-                // --- SMART COLUMN DETECTION ALGORITHM ---
+                // --- SMART COLUMN DETECTION (CSV/Excel) ---
                 let headerRowIndex = -1;
                 let colMapping = { upc: -1, cost: -1, itemNumber: -1 };
-
                 const upcKeywords = ['upc', 'barcode', 'ean', 'gtin', 'each upc'];
                 const costKeywords = ['cost', 'price', 'ea price', 'unit price'];
                 const itemNumKeywords = ['item number', 'item', 'sku', 'part number', 'model'];
 
-                // Scan rows to find the one that looks like a header (has both UPC and Cost)
-                for (let i = 0; i < Math.min(rows.length, 50); i++) { // search in first 50 rows
+                for (let i = 0; i < Math.min(rows.length, 50); i++) {
                     let row = rows[i];
                     if (!row || !Array.isArray(row)) continue;
-
-                    let foundUpcStr = -1;
-                    let foundCostStr = -1;
-                    let foundItemNumStr = -1;
-
+                    let foundUpcStr = -1, foundCostStr = -1, foundItemNumStr = -1;
                     for (let c = 0; c < row.length; c++) {
                         const cellVal = String(row[c] || '').toLowerCase().trim();
                         if (!cellVal) continue;
-
                         if (foundUpcStr === -1 && upcKeywords.some(k => cellVal.includes(k))) foundUpcStr = c;
                         else if (foundCostStr === -1 && costKeywords.some(k => cellVal.includes(k))) foundCostStr = c;
                         else if (foundItemNumStr === -1 && itemNumKeywords.some(k => cellVal.includes(k))) foundItemNumStr = c;
                     }
-
                     if (foundUpcStr !== -1 && foundCostStr !== -1) {
-                        headerRowIndex = i;
-                        colMapping.upc = foundUpcStr;
-                        colMapping.cost = foundCostStr;
-                        colMapping.itemNumber = foundItemNumStr;
+                        headerRowIndex = i; colMapping.upc = foundUpcStr;
+                        colMapping.cost = foundCostStr; colMapping.itemNumber = foundItemNumStr;
                         break;
                     }
                 }
 
-                if (headerRowIndex === -1) {
-                    throw new Error("Could not detect 'UPC' and 'Cost' columns automatically. Make sure the file has clear headers.");
-                }
+                if (headerRowIndex === -1) throw new Error("Could not detect 'UPC' and 'Cost' columns automatically. Make sure the file has clear headers.");
 
                 pendingItems = [];
-                // Process data rows after the header
                 for (let i = headerRowIndex + 1; i < rows.length; i++) {
                     const row = rows[i];
                     if (!row || !Array.isArray(row)) continue;
-
                     const rawUpc = String(row[colMapping.upc] || '').trim();
                     const rawCost = String(row[colMapping.cost] || '').trim();
                     const rawItemNum = colMapping.itemNumber !== -1 ? String(row[colMapping.itemNumber] || '').trim() : '';
-
-                    if (!rawUpc && !rawCost) continue; // skip entirely empty detected rows
-
-                    // Parse Cost strictly
+                    if (!rawUpc && !rawCost) continue;
                     let cleanStr = rawCost.replace(/[^0-9.,-]/g, '');
-                    if (cleanStr.includes(',') && !cleanStr.includes('.')) {
-                        cleanStr = cleanStr.replace(/,/g, '.');
-                    } else if (cleanStr.includes(',') && cleanStr.includes('.')) {
-                        if (cleanStr.lastIndexOf(',') > cleanStr.lastIndexOf('.')) {
-                            cleanStr = cleanStr.replace(/\./g, '').replace(',', '.');
-                        } else {
-                            cleanStr = cleanStr.replace(/,/g, '');
-                        }
+                    if (cleanStr.includes(',') && !cleanStr.includes('.')) cleanStr = cleanStr.replace(/,/g, '.');
+                    else if (cleanStr.includes(',') && cleanStr.includes('.')) {
+                        cleanStr = cleanStr.lastIndexOf(',') > cleanStr.lastIndexOf('.')
+                            ? cleanStr.replace(/\./g, '').replace(',', '.') : cleanStr.replace(/,/g, '');
                     }
-                    const cost = parseFloat(cleanStr) || 0;
-
-                    pendingItems.push({
-                        itemNumber: rawItemNum,
-                        upc: rawUpc,
-                        cost: cost
-                    });
+                    pendingItems.push({ itemNumber: rawItemNum, upc: rawUpc, cost: parseFloat(cleanStr) || 0 });
                 }
 
-                statusText.innerText = `Found ${pendingItems.length} items to process in the file. Ready to send!`;
+                statusText.innerText = `Found ${pendingItems.length} items to process. Ready to send!`;
                 processBtn.disabled = false;
 
             } catch (err) {
                 statusText.innerText = `Parsing Error: ${err.message}`;
             }
         });
+
+        // =====================================================
+        // PDF HANDLING — Text-based + OCR + Column Mapping
+        // =====================================================
+        let _pdfRows = [];
+
+        async function handlePdfFile(file) {
+            if (typeof pdfjsLib === 'undefined') {
+                statusText.innerText = '❌ PDF library not loaded yet. Please wait and try again.';
+                return;
+            }
+            pdfjsLib.GlobalWorkerOptions.workerSrc = window.pdfjsWorkerSrc;
+
+            const arrayBuffer = await file.arrayBuffer();
+            const pdf = await pdfjsLib.getDocument({ data: arrayBuffer }).promise;
+            const numPages = pdf.numPages;
+            let allItems = [], totalChars = 0;
+
+            for (let p = 1; p <= numPages; p++) {
+                statusText.innerText = `Читаємо PDF — сторінка ${p}/${numPages}...`;
+                const page = await pdf.getPage(p);
+                const content = await page.getTextContent();
+                content.items.forEach(item => {
+                    if (item.str && item.str.trim()) {
+                        totalChars += item.str.trim().length;
+                        allItems.push({ str: item.str.trim(), x: Math.round(item.transform[4]), y: Math.round(item.transform[5]) });
+                    }
+                });
+            }
+
+            const isScanned = (totalChars / numPages) < 50;
+            const pdfTypeTag = document.getElementById('pdfTypeTag');
+
+            if (isScanned) {
+                pdfTypeTag.textContent = '📷 scanned (OCR)';
+                pdfTypeTag.style.cssText = 'background:#d299221A;color:#d29922;border:1px solid #d2992244';
+                statusText.innerText = 'Запускаємо OCR... (може зайняти хвилину)';
+
+                try {
+                    const loadTask2 = pdfjsLib.getDocument({ data: await file.arrayBuffer() }).promise;
+                    const pdf2 = await loadTask2;
+                    const page1 = await pdf2.getPage(1);
+                    const viewport = page1.getViewport({ scale: 2 });
+                    const canvas = document.createElement('canvas');
+                    canvas.width = viewport.width; canvas.height = viewport.height;
+                    await page1.render({ canvasContext: canvas.getContext('2d'), viewport }).promise;
+                    const imageData = canvas.toDataURL('image/png');
+
+                    const worker = await Tesseract.createWorker('eng');
+                    const result = await worker.recognize(imageData);
+                    await worker.terminate();
+
+                    const conf = Math.round(result.data.confidence);
+                    document.getElementById('ocrAccuracy').textContent = conf;
+                    document.getElementById('ocrWarning').classList.toggle('hidden', conf >= 90);
+
+                    allItems = [];
+                    result.data.text.split('\n').forEach((line, rowIdx) => {
+                        line.trim().split(/\s{2,}|\t/).forEach((part, colIdx) => {
+                            if (part.trim()) allItems.push({ str: part.trim(), x: colIdx * 120, y: -rowIdx * 20 });
+                        });
+                    });
+                } catch (ocrErr) {
+                    statusText.innerText = `OCR failed: ${ocrErr.message}`;
+                    return;
+                }
+            } else {
+                pdfTypeTag.textContent = '📝 text-based';
+                pdfTypeTag.style.cssText = 'background:#1F6FEB1A;color:#58a6ff;border:1px solid #1F6FEB44';
+                document.getElementById('ocrWarning').classList.add('hidden');
+            }
+
+            _pdfRows = detectTableFromItems(allItems);
+            openColumnMappingModal(_pdfRows);
+        }
+
+        function detectTableFromItems(items) {
+            if (!items.length) return [];
+            const rowMap = {};
+            items.forEach(item => {
+                const yKey = Math.round(item.y / 6) * 6;
+                if (!rowMap[yKey]) rowMap[yKey] = [];
+                rowMap[yKey].push(item);
+            });
+            const sortedYs = Object.keys(rowMap).map(Number).sort((a, b) => b - a);
+            return sortedYs.map(y => rowMap[y].sort((a, b) => a.x - b.x).map(c => c.str)).filter(r => r.length > 0);
+        }
+
+        function openColumnMappingModal(rows) {
+            if (!rows.length) { statusText.innerText = 'No table data found in PDF.'; return; }
+            const maxCols = Math.max(...rows.map(r => r.length));
+
+            // Build preview
+            const previewHead = document.getElementById('pdfPreviewHead');
+            const previewBody = document.getElementById('pdfPreviewBody');
+            previewHead.innerHTML = '';
+            previewBody.innerHTML = '';
+            const headRow = document.createElement('tr');
+            for (let c = 0; c < maxCols; c++) {
+                const th = document.createElement('th');
+                th.style.cssText = 'padding:8px 12px;background:#0d1117;color:#8b949e;font-size:10px;font-weight:700;text-align:left;border-bottom:1px solid #30363d';
+                th.textContent = `Col ${String.fromCharCode(65 + c)}`;
+                headRow.appendChild(th);
+            }
+            previewHead.appendChild(headRow);
+            rows.slice(0, 6).forEach((row, ri) => {
+                const tr = document.createElement('tr');
+                for (let c = 0; c < maxCols; c++) {
+                    const td = document.createElement('td');
+                    td.style.cssText = `padding:6px 12px;font-size:11px;border-bottom:1px solid #21262d;color:${ri === 0 ? '#e6edf3' : '#c9d1d9'};background:${ri % 2 === 0 ? '#161b22' : '#1c2128'}`;
+                    td.textContent = row[c] || '';
+                    tr.appendChild(td);
+                }
+                previewBody.appendChild(tr);
+            });
+
+            // Build mapper cards
+            const colMappers = document.getElementById('colMappers');
+            colMappers.innerHTML = '';
+            const ROLES = [
+                { value: 'ignore', label: '🚫 Ignore' },
+                { value: 'upc', label: '🔢 UPC / Barcode' },
+                { value: 'cost', label: '💰 Cost / Price' },
+                { value: 'itemnum', label: '🏷️ Item# / SKU' },
+                { value: 'brand', label: '🏪 Brand' },
+            ];
+
+            function guessRole(ci) {
+                const samples = rows.slice(0, 5).map(r => String(r[ci] || '').toLowerCase().trim());
+                const h = samples[0] || '';
+                if (/upc|barcode|ean|gtin/.test(h)) return 'upc';
+                if (/cost|price/.test(h)) return 'cost';
+                if (/item|sku|part|model/.test(h)) return 'itemnum';
+                if (/brand/.test(h)) return 'brand';
+                const vals = samples.slice(1).filter(Boolean);
+                if (vals.length && vals.every(v => /^\d{10,14}$/.test(v.replace(/\D/g, '')))) return 'upc';
+                if (vals.length && vals.every(v => /^\$?\d+\.?\d*$/.test(v))) return 'cost';
+                return 'ignore';
+            }
+
+            for (let c = 0; c < maxCols; c++) {
+                const card = document.createElement('div');
+                card.className = 'col-mapper-card';
+                const label = document.createElement('div');
+                label.style.cssText = 'font-size:11px;font-weight:700;color:#e6edf3';
+                label.textContent = `Column ${String.fromCharCode(65 + c)}`;
+                const sampleDiv = document.createElement('div');
+                rows.slice(0, 4).forEach(r => {
+                    if (!r[c]) return;
+                    const s = document.createElement('div');
+                    s.className = 'col-preview-val';
+                    s.textContent = r[c];
+                    sampleDiv.appendChild(s);
+                });
+                const select = document.createElement('select');
+                select.dataset.col = c;
+                ROLES.forEach(opt => {
+                    const o = document.createElement('option');
+                    o.value = opt.value; o.textContent = opt.label;
+                    if (opt.value === guessRole(c)) o.selected = true;
+                    select.appendChild(o);
+                });
+                card.appendChild(label); card.appendChild(sampleDiv); card.appendChild(select);
+                colMappers.appendChild(card);
+            }
+
+            document.getElementById('mappingErrors').classList.add('hidden');
+            document.getElementById('mappingCount').textContent = `${rows.length} рядків знайдено`;
+            document.getElementById('colMappingOverlay').classList.remove('hidden');
+            statusText.innerText = 'PDF завантажено — призначте колонки та натисніть Confirm.';
+        }
+
+        document.getElementById('confirmMappingBtn').addEventListener('click', () => {
+            const selects = document.querySelectorAll('#colMappers select');
+            const mapping = Array.from(selects).map(s => ({ col: parseInt(s.dataset.col), role: s.value }));
+            const rows = _pdfRows;
+            const errors = [];
+            if (!mapping.some(m => m.role === 'upc' || m.role === 'itemnum'))
+                errors.push('Потрібна хоча б одна колонка UPC або Item#/SKU');
+            if (!mapping.some(m => m.role === 'cost'))
+                errors.push('Потрібна хоча б одна колонка Cost/Price');
+            const dataRows = rows.slice(1).filter(r => r.some(c => c && c.trim()));
+            if (!dataRows.length) errors.push('Жодного рядка з даними не знайдено');
+            if (dataRows.some(r => r.some(c => c && /[^\x00-\x7F]{3,}/.test(c))))
+                errors.push('Файл може містити пошкоджені символи — перевірте дані');
+
+            const errBox = document.getElementById('mappingErrors');
+            if (errors.length) {
+                errBox.classList.remove('hidden');
+                errBox.innerHTML = errors.map(e => `⚠️ ${e}`).join('<br>');
+                return;
+            }
+            errBox.classList.add('hidden');
+
+            const upcCol = mapping.find(m => m.role === 'upc')?.col ?? -1;
+            const costCol = mapping.find(m => m.role === 'cost')?.col ?? -1;
+            const itemCol = mapping.find(m => m.role === 'itemnum')?.col ?? -1;
+
+            pendingItems = [];
+            dataRows.forEach(row => {
+                const rawUpc = upcCol >= 0 ? String(row[upcCol] || '').trim() : '';
+                const rawCost = costCol >= 0 ? String(row[costCol] || '').trim() : '';
+                const rawItem = itemCol >= 0 ? String(row[itemCol] || '').trim() : '';
+                if (!rawUpc && !rawCost) return;
+                let cs = rawCost.replace(/[^0-9.,-]/g, '');
+                if (cs.includes(',') && !cs.includes('.')) cs = cs.replace(/,/g, '.');
+                else if (cs.includes(',') && cs.includes('.'))
+                    cs = cs.lastIndexOf(',') > cs.lastIndexOf('.') ? cs.replace(/\./g, '').replace(',', '.') : cs.replace(/,/g, '');
+                pendingItems.push({ itemNumber: rawItem, upc: rawUpc, cost: parseFloat(cs) || 0 });
+            });
+
+            document.getElementById('colMappingOverlay').classList.add('hidden');
+            statusText.innerText = `Loaded ${pendingItems.length} items from PDF. Ready to process!`;
+            processBtn.disabled = pendingItems.length === 0;
+        });
+
+
 
         processBtn.addEventListener('click', async () => {
             if (pendingItems.length === 0) return;
