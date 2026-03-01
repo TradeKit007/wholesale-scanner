@@ -164,9 +164,13 @@
             inset: 0;
             background: rgba(0, 0, 0, 0.75);
             z-index: 1000;
-            display: flex;
+            display: none;
             align-items: center;
             justify-content: center;
+        }
+
+        #colMappingOverlay.pdf-modal-open {
+            display: flex;
         }
 
         #colMappingBox {
@@ -249,12 +253,35 @@
 
                 <!-- File -->
                 <div class="flex items-center gap-2">
-                    <input type="file" id="csvFile" accept=".csv, .xls, .xlsx, .pdf" class="hidden">
-                    <label for="csvFile"
+                    <input type="file" id="csvFile" accept=".csv, .xls, .xlsx, .pdf"
+                        style="position:absolute;opacity:0;width:1px;height:1px;">
+                    <button type="button" id="csvFileLabel" onclick="document.getElementById('csvFile').click()"
                         class="cursor-pointer bg-blue-600 hover:bg-blue-700 text-white text-xs font-semibold py-2 px-4 rounded-lg shadow transition-colors whitespace-nowrap">
                         📂 Select File
-                    </label>
+                    </button>
                     <div id="fileInfo" class="text-xs font-medium" style="color:#8b949e">No file selected</div>
+                </div>
+
+                <div class="w-px h-8" style="background:#30363d"></div>
+
+                <!-- Catalog Mode Toggle -->
+                <div class="flex items-center gap-2">
+                    <button type="button" id="catalogModeBtn" onclick="toggleCatalogMode()"
+                        title="Scan PDF catalogs with barcodes — auto-extracts UPC + Price"
+                        class="text-xs font-semibold py-2 px-3 rounded-lg border transition-all whitespace-nowrap"
+                        style="border-color:#30363d;color:#8b949e;background:#0d1117">
+                        🏪 Catalog Mode
+                    </button>
+                    <div id="catalogPageRange" class="items-center gap-1" style="display:none">
+                        <span class="text-xs" style="color:#8b949e">Pages</span>
+                        <input type="number" id="catalogFrom" value="1" min="1"
+                            class="w-12 rounded py-1 px-1 text-xs text-white text-center mx-1"
+                            style="background:#0d1117;border:1px solid #30363d">
+                        <span class="text-xs" style="color:#8b949e">→</span>
+                        <input type="number" id="catalogTo" value="200" min="1"
+                            class="w-14 rounded py-1 px-1 text-xs text-white text-center mx-1"
+                            style="background:#0d1117;border:1px solid #30363d">
+                    </div>
                 </div>
 
                 <div class="w-px h-8" style="background:#30363d"></div>
@@ -338,11 +365,46 @@
                     class="bg-green-500 hover:bg-green-600 text-white font-bold py-2 px-6 rounded-lg shadow transition-all text-sm">
                     ✅ Confirm & Load Items
                 </button>
-                <button onclick="document.getElementById('colMappingOverlay').classList.add('hidden')"
+                <button onclick="document.getElementById('colMappingOverlay').classList.remove('pdf-modal-open')"
                     class="text-sm font-semibold" style="color:#8b949e">
                     Cancel
                 </button>
                 <span id="mappingCount" class="text-xs ml-auto" style="color:#8b949e"></span>
+            </div>
+        </div>
+    </div>
+
+    <!-- ===== CATALOG RESULTS PREVIEW ===== -->
+    <div id="catalogResultsBlock" class="max-w-7xl mx-auto mb-4" style="display:none">
+        <div class="scanner-card rounded-xl shadow-2xl px-6 py-5">
+            <div class="flex items-center justify-between mb-4">
+                <div>
+                    <h2 class="text-lg font-bold text-white">🏪 Catalog Scan Results</h2>
+                    <p class="text-xs mt-1" style="color:#8b949e">Verify prices below. Edit any cell if needed, then
+                        click <strong style="color:#3fb950">Start Processing</strong>.</p>
+                </div>
+                <div class="flex items-center gap-3">
+                    <span id="catalogFoundCount" class="text-xs font-bold px-3 py-1 rounded-full"
+                        style="background:#1f6feb22;color:#58a6ff;border:1px solid #1f6feb44">0 products</span>
+                    <button onclick="document.getElementById('catalogResultsBlock').style.display='none'"
+                        class="text-xs py-1 px-3 rounded-lg border transition-colors"
+                        style="border-color:#30363d;color:#8b949e">✕ Clear</button>
+                </div>
+            </div>
+            <div class="overflow-x-auto" style="max-height:340px;overflow-y:auto">
+                <table class="w-full text-left text-xs" id="catalogPreviewTable">
+                    <thead style="position:sticky;top:0;z-index:1">
+                        <tr style="background:#0d1117;color:#8b949e;border-bottom:1px solid #30363d">
+                            <th class="px-3 py-2 font-semibold">#</th>
+                            <th class="px-3 py-2 font-semibold">UPC</th>
+                            <th class="px-3 py-2 font-semibold">Item #</th>
+                            <th class="px-3 py-2 font-semibold">Product Name</th>
+                            <th class="px-3 py-2 font-semibold">Cost ($)</th>
+                            <th class="px-3 py-2 font-semibold">Status</th>
+                        </tr>
+                    </thead>
+                    <tbody id="catalogPreviewBody" style="color:#e6edf3"></tbody>
+                </table>
             </div>
         </div>
     </div>
@@ -531,6 +593,193 @@
         const profTable = document.getElementById('profTable');
         const errorTable = document.getElementById('errorTable');
 
+        console.log('[DEBUG] Script init. fileInput:', fileInput, 'stopBtn:', stopBtn, 'statusText:', statusText);
+
+        // File label click handled via inline onclick
+
+        let catalogMode = false;
+
+        function toggleCatalogMode() {
+            catalogMode = !catalogMode;
+            const btn = document.getElementById('catalogModeBtn');
+            const range = document.getElementById('catalogPageRange');
+            if (catalogMode) {
+                btn.style.cssText = 'border-color:#f78166;color:#f78166;background:#2d1b1b;';
+                btn.textContent = '🏪 Catalog Mode ON';
+                range.style.display = 'flex';
+            } else {
+                btn.style.cssText = 'border-color:#30363d;color:#8b949e;background:#0d1117;';
+                btn.textContent = '🏪 Catalog Mode';
+                range.style.display = 'none';
+            }
+        }
+
+        // ============================================================
+        //  CATALOG PDF — Barcode + Proximity Scanner
+        // ============================================================
+        async function handleCatalogPdf(file) {
+            if (!('BarcodeDetector' in window)) {
+                statusText.innerText = '❌ Barcode detection requires Google Chrome 83+. Please switch browser.';
+                return;
+            }
+
+            const fromPage = Math.max(1, parseInt(document.getElementById('catalogFrom').value) || 1);
+            const toPage = parseInt(document.getElementById('catalogTo').value) || 200;
+
+            statusText.innerText = '📖 Loading PDF into memory…';
+            let arrayBuffer;
+            try { arrayBuffer = await file.arrayBuffer(); }
+            catch (e) { statusText.innerText = '❌ Could not read file: ' + e.message; return; }
+
+            let pdf;
+            try {
+                pdfjsLib.GlobalWorkerOptions.workerSrc = window.pdfjsWorkerSrc;
+                pdf = await pdfjsLib.getDocument({ data: arrayBuffer }).promise;
+            } catch (e) { statusText.innerText = '❌ PDF.js error: ' + e.message; return; }
+
+            const startPage = fromPage;
+            const endPage = Math.min(pdf.numPages, toPage);
+            statusText.innerText = `PDF has ${pdf.numPages} pages. Scanning ${startPage}–${endPage}…`;
+
+            const barcodeDetector = new BarcodeDetector({
+                formats: ['ean_13', 'upc_a', 'upc_e', 'code_128', 'code_39']
+            });
+
+            const products = new Map(); // upc → {upc, itemNum, cost, name, page}
+
+            for (let pageNum = startPage; pageNum <= endPage; pageNum++) {
+                statusText.innerText = `🔍 Page ${pageNum}/${endPage} — found ${products.size} products so far…`;
+                await new Promise(r => setTimeout(r, 0)); // yield to UI
+
+                const page = await pdf.getPage(pageNum);
+                const SCALE = 2.5;
+                const viewport = page.getViewport({ scale: SCALE });
+
+                // --- Render page to canvas ---
+                const canvas = document.createElement('canvas');
+                canvas.width = viewport.width;
+                canvas.height = viewport.height;
+                const ctx = canvas.getContext('2d');
+                await page.render({ canvasContext: ctx, viewport }).promise;
+
+                // --- Extract text with coordinates ---
+                const textContent = await page.getTextContent();
+                const textItems = textContent.items
+                    .map(it => ({
+                        str: it.str.trim(),
+                        x: it.transform[4] * SCALE,
+                        y: (it.transform[5]) * SCALE   // PDF y from bottom
+                    }))
+                    .filter(it => it.str.length > 0);
+
+                // --- Scan barcodes ---
+                let barcodes = [];
+                try { barcodes = await barcodeDetector.detect(canvas); }
+                catch (e) { console.warn(`Page ${pageNum}:`, e); continue; }
+
+                for (const bc of barcodes) {
+                    let upc = bc.rawValue.replace(/\D/g, '');
+                    if (upc.length < 8 || upc.length > 14) continue;
+                    // Normalize EAN-13 with leading 0 → UPC-A 12 digits
+                    if (upc.length === 13 && upc.startsWith('0')) upc = upc.slice(1);
+                    if (products.has(upc)) continue; // deduplicate
+
+                    // Barcode center on canvas (canvas Y from top, PDF Y from bottom)
+                    const bcCX = bc.boundingBox.x + bc.boundingBox.width / 2;
+                    const bcCY = bc.boundingBox.y + bc.boundingBox.height / 2;
+
+                    // PDF.js y is from BOTTOM, canvas y is from TOP — convert for matching
+                    const bcPdfY = (viewport.height - bcCY); // rough canvas→pdf y
+
+                    // Find text items within ~300px (canvas units) of barcode center
+                    const nearby = textItems.filter(t => {
+                        const dx = t.x - bcCX;
+                        // Compare in canvas Y space: text y (from bottom)*SCALE vs canvas Y from top
+                        const tCanvasY = viewport.height - t.y;
+                        const dy = tCanvasY - bcCY;
+                        return Math.abs(dx) < 450 && Math.abs(dy) < 400;
+                    });
+
+                    // Price: first $X.XX match found near barcode
+                    const allNearbyText = nearby.map(t => t.str).join(' ');
+                    const priceMatch = allNearbyText.match(/\$\s*(\d+\.?\d*)/);
+                    const cost = priceMatch ? parseFloat(priceMatch[1]) : 0;
+
+                    // Item#: 5–6 digit standalone number
+                    const itemItem = nearby.find(t => /^\d{5,6}$/.test(t.str));
+                    const itemNum = itemItem ? itemItem.str : '';
+
+                    // Name: longest string containing letters (exclude packaging/price text)
+                    const nameItem = nearby
+                        .filter(t => /[a-zA-Z]/.test(t.str) && t.str.length > 4
+                            && !/^(\d|\/CS|\/EA|\/DL|\/PK|\$|Brand:|Origin:)/.test(t.str))
+                        .sort((a, b) => b.str.length - a.str.length)[0];
+                    const name = nameItem ? nameItem.str : '';
+
+                    products.set(upc, { upc, itemNum, cost, name, page: pageNum });
+                }
+            }
+
+            if (products.size === 0) {
+                statusText.innerText = '⚠️ No barcodes detected. Try: increase page range, or check if PDF is scanned vs text-based.';
+                return;
+            }
+
+            const productList = Array.from(products.values());
+            pendingItems = productList.map(p => ({ upc: p.upc, cost: p.cost, itemNumber: p.itemNum }));
+            showCatalogResults(productList);
+            processBtn.disabled = false;
+            statusText.innerText = `✅ ${products.size} barcodes found! Review prices below, then click Start Processing.`;
+        }
+
+        function showCatalogResults(products) {
+            const tbody = document.getElementById('catalogPreviewBody');
+            const block = document.getElementById('catalogResultsBlock');
+            document.getElementById('catalogFoundCount').textContent = `${products.length} products`;
+            tbody.innerHTML = '';
+
+            products.forEach((p, i) => {
+                const hasCost = p.cost > 0;
+                const hasItemNum = p.itemNum.length > 0;
+                const statusHtml = hasCost
+                    ? `<span style="color:#3fb950">✅ OK</span>`
+                    : `<span style="color:#f78166">⚠️ No price</span>`;
+
+                const tr = document.createElement('tr');
+                tr.style.cssText = 'border-bottom:1px solid #21262d;transition:background 0.15s';
+                tr.onmouseenter = () => tr.style.background = '#161b22';
+                tr.onmouseleave = () => tr.style.background = '';
+                tr.innerHTML = `
+                    <td class="px-3 py-2" style="color:#8b949e">${i + 1}</td>
+                    <td class="px-3 py-2 font-mono" style="color:#58a6ff">${p.upc}</td>
+                    <td class="px-3 py-2" style="color:#8b949e">${p.itemNum || '—'}</td>
+                    <td class="px-3 py-2" style="max-width:260px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis"
+                        title="${p.name}">${p.name || '—'}</td>
+                    <td class="px-3 py-2">
+                        <input type="number" step="0.01" value="${p.cost || ''}" placeholder="0.00"
+                            data-upc="${p.upc}"
+                            onchange="updateCatalogCost(this)"
+                            style="background:#0d1117;border:1px solid #30363d;color:#e6edf3;border-radius:6px;padding:2px 6px;width:80px;font-size:11px">
+                    </td>
+                    <td class="px-3 py-2">${statusHtml}</td>`;
+                tbody.appendChild(tr);
+            });
+
+            block.style.display = 'block';
+        }
+
+        function updateCatalogCost(input) {
+            const upc = input.dataset.upc;
+            const cost = parseFloat(input.value) || 0;
+            const item = pendingItems.find(p => p.upc === upc);
+            if (item) item.cost = cost;
+            // Update status cell
+            const td = input.closest('tr').querySelector('td:last-child');
+            td.innerHTML = cost > 0
+                ? `<span style="color:#3fb950">✅ OK</span>`
+                : `<span style="color:#f78166">⚠️ No price</span>`;
+        }
+
         let pendingItems = [];
         let isProcessingCanceled = false;
 
@@ -545,17 +794,19 @@
         });
 
         fileInput.addEventListener('change', async (e) => {
+            console.log('[DEBUG] File change fired. files:', e.target.files);
             const file = e.target.files[0];
             if (!file) return;
+
 
             fileInfo.innerText = file.name;
             statusText.innerText = "Parsing file locally (Smart Detection)...";
             processBtn.disabled = true;
 
-            const MAX_PDF_MB = 20;
+            const MAX_PDF_MB = 100;
             if (file.size > MAX_PDF_MB * 1024 * 1024) {
-                statusText.innerText = `File too large. Max ${MAX_PDF_MB}MB allowed.`;
-                return;
+                statusText.innerText = `⚠️ Large file (${(file.size / 1024 / 1024).toFixed(0)}MB). Processing may be slow...`;
+                // Don't return — still try to process
             }
 
             try {
@@ -567,8 +818,13 @@
                 variationCounter = 1;
 
                 if (ext === 'pdf') {
-                    await handlePdfFile(file);
-                    return; // PDF opens column mapping modal — don't auto-detect
+                    if (catalogMode) {
+                        await handleCatalogPdf(file);
+                    } else {
+                        await handlePdfFile(file);
+                    }
+                    return; // PDF has its own flow
+
                 } else if (ext === 'csv') {
                     rows = await new Promise((resolve) => {
                         Papa.parse(file, {
@@ -718,25 +974,82 @@
                 document.getElementById('ocrWarning').classList.add('hidden');
             }
 
+            // ===== DEBUG: Show all extracted text =====
+            console.group('📄 PDF Text Extract Debug');
+            console.log(`Total text items: ${allItems.length}`);
+            const sorted = [...allItems].sort((a, b) => b.y - a.y || a.x - b.x);
+            sorted.forEach(item => {
+                const isItemNum = /^\d{5,6}$/.test(item.str);
+                const isPrice = /\$\d+\.\d{2}/.test(item.str);
+                const isUPC = /^\d{10,14}$/.test(item.str.replace(/\s/g, ''));
+                const tag = isUPC ? '🔢UPC' : isPrice ? '💰PRICE' : isItemNum ? '🏷️ITEM#' : '';
+                if (tag || isItemNum || isPrice || isUPC)
+                    console.log(`${tag} [x:${item.x} y:${item.y}] "${item.str}"`);
+            });
+            // Also print ALL items so we see everything
+            console.log('--- ALL items (first 100):');
+            sorted.slice(0, 100).forEach(i => console.log(`[x:${i.x} y:${i.y}] "${i.str}"`));
+            console.groupEnd();
+            // ==========================================
+
             _pdfRows = detectTableFromItems(allItems);
             openColumnMappingModal(_pdfRows);
         }
 
         function detectTableFromItems(items) {
             if (!items.length) return [];
+
+            // Step 1: Group by Y coordinate with generous tolerance (12px)
             const rowMap = {};
             items.forEach(item => {
-                const yKey = Math.round(item.y / 6) * 6;
+                const yKey = Math.round(item.y / 12) * 12;
                 if (!rowMap[yKey]) rowMap[yKey] = [];
                 rowMap[yKey].push(item);
             });
+
+            // Step 2: Sort rows by Y descending (PDF coords are bottom-up)
             const sortedYs = Object.keys(rowMap).map(Number).sort((a, b) => b - a);
-            return sortedYs.map(y => rowMap[y].sort((a, b) => a.x - b.x).map(c => c.str)).filter(r => r.length > 0);
+            const rawRows = sortedYs
+                .map(y => rowMap[y].sort((a, b) => a.x - b.x))
+                .filter(r => r.length > 0);
+
+            if (!rawRows.length) return [];
+
+            // Step 3: Find common X column positions across rows (cluster X values)
+            const allX = rawRows.flatMap(r => r.map(c => c.x));
+            allX.sort((a, b) => a - b);
+            const colPositions = [];
+            let lastX = -9999;
+            allX.forEach(x => {
+                if (x - lastX > 20) { colPositions.push(x); lastX = x; }
+                else lastX = Math.round((lastX + x) / 2); // merge close X values
+            });
+
+            // Step 4: Assign each item to nearest column
+            return rawRows.map(row => {
+                const cells = new Array(colPositions.length).fill('');
+                row.forEach(item => {
+                    let nearest = 0, minDist = Infinity;
+                    colPositions.forEach((xp, ci) => {
+                        const d = Math.abs(item.x - xp);
+                        if (d < minDist) { minDist = d; nearest = ci; }
+                    });
+                    cells[nearest] = cells[nearest] ? cells[nearest] + ' ' + item.str : item.str;
+                });
+                return cells;
+            }).filter(r => r.some(c => c.trim()));
         }
 
         function openColumnMappingModal(rows) {
-            if (!rows.length) { statusText.innerText = 'No table data found in PDF.'; return; }
+            if (!rows.length) {
+                statusText.innerText = '❌ No table structure found in this PDF. Try a different file or convert it to CSV/Excel first.';
+                return;
+            }
             const maxCols = Math.max(...rows.map(r => r.length));
+            if (maxCols < 2) {
+                statusText.innerText = '❌ PDF appears to have only 1 column — no table structure detected. Please use CSV or Excel instead.';
+                return;
+            }
 
             // Build preview
             const previewHead = document.getElementById('pdfPreviewHead');
@@ -814,7 +1127,7 @@
 
             document.getElementById('mappingErrors').classList.add('hidden');
             document.getElementById('mappingCount').textContent = `${rows.length} рядків знайдено`;
-            document.getElementById('colMappingOverlay').classList.remove('hidden');
+            document.getElementById('colMappingOverlay').classList.add('pdf-modal-open');
             statusText.innerText = 'PDF завантажено — призначте колонки та натисніть Confirm.';
         }
 
@@ -857,11 +1170,18 @@
                 pendingItems.push({ itemNumber: rawItem, upc: rawUpc, cost: parseFloat(cs) || 0 });
             });
 
-            document.getElementById('colMappingOverlay').classList.add('hidden');
+            document.getElementById('colMappingOverlay').classList.remove('pdf-modal-open');
             statusText.innerText = `Loaded ${pendingItems.length} items from PDF. Ready to process!`;
             processBtn.disabled = pendingItems.length === 0;
         });
 
+        // Close modal on Escape or clicking outside
+        document.addEventListener('keydown', e => {
+            if (e.key === 'Escape') document.getElementById('colMappingOverlay').classList.remove('pdf-modal-open');
+        });
+        document.getElementById('colMappingOverlay').addEventListener('click', function (e) {
+            if (e.target === this) this.classList.remove('pdf-modal-open');
+        });
 
 
         processBtn.addEventListener('click', async () => {
