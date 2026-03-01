@@ -545,6 +545,11 @@
                                 type="text" data-col="17"
                                 class="filter-input w-full mt-2 p-1 text-xs rounded font-normal" placeholder="&gt; 30">
                         </th>
+                        <th class="px-3 py-3 text-xs font-semibold align-top uppercase tracking-wider text-center">
+                            Set<br><input type="text" data-col="18"
+                                class="filter-input w-full mt-2 p-1 text-xs rounded font-normal text-center"
+                                placeholder="2 3">
+                        </th>
                         <th class="px-3 py-3 text-xs font-semibold uppercase tracking-wider text-center">Action</th>
                     </tr>
                 </thead>
@@ -1343,6 +1348,39 @@
                     ? `<span class="badge badge-blocked">🔒 Restricted</span>`
                     : `<span class="badge badge-clear">✓ Clear</span>`;
 
+                // ---- Set Quantity Detection ----
+                function detectSetQty(title) {
+                    if (!title) return 1;
+                    const patterns = [
+                        [/(\d+)\s*-\s*[Pp]ack/, null],
+                        [/(\d+)\s*[Pp]ack\b/, null],
+                        [/[Pp]ack\s+of\s+(\d+)/, null],
+                        [/[Ss]et\s+of\s+(\d+)/, null],
+                        [/(\d+)\s*-?\s*[Cc]ount\b/, null],
+                        [/\((\d+)\s*[Cc]ount\)/, null],
+                        [/(\d+)\s*-?\s*[Cc]t\.?\b/, null],
+                        [/(\d+)\s*-?\s*[Pp]iece/, null],
+                        [/(\d+)\s*[Pp]k\b/i, null],
+                        [/\((\d+)\s*[Pp]ack\)/, null],
+                        [/[Bb]undle\s+of\s+(\d+)/, null],
+                        [/[Tt]win\s*[Pp]ack/, 2],
+                        [/[Tt]riple\s*[Pp]ack/, 3],
+                        [/[Qq]uad\s*[Pp]ack/, 4],
+                    ];
+                    for (const [rx, fixed] of patterns) {
+                        const m = title.match(rx);
+                        if (m) return fixed !== null ? fixed : (parseInt(m[1]) || 1);
+                    }
+                    return 1;
+                }
+                const setQty = detectSetQty(item.Title);
+                const setQtyHtml = setQty > 1
+                    ? `<span style="background:#1f6feb22;color:#58a6ff;border:1px solid #1f6feb55;padding:2px 8px;border-radius:12px;font-weight:700;font-size:11px">${setQty}×</span>`
+                    : `<span style="color:#484f58;font-size:11px">1×</span>`;
+                tr.dataset.setQty = setQty;
+                // --------------------------------
+
+
                 const strat = item.Strategy || '';
                 let stratBadge;
                 if (strat.includes('Amz') || strat.includes('Amazon')) stratBadge = `<span class="badge badge-amazon">🛒 Amazon</span>`;
@@ -1384,6 +1422,7 @@
                     <td class="px-3 py-3 text-center" ${td}>${keepaAvg30Html}</td>
                     <td class="px-3 py-3" ${td}>${profitHtml}</td>
                     <td class="px-3 py-3" ${td}>${roiHtml}</td>
+                    <td class="px-3 py-3 text-center" ${td}>${setQtyHtml}</td>
                     <td class="px-3 py-3 text-center" ${td}>
                         <button onclick="discardItem(this)" style="color:#f85149;background:rgba(248,81,73,0.1);border:1px solid rgba(248,81,73,0.2)" class="p-1.5 rounded transition-all hover:opacity-80" title="Discard Item">
                             <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M6 18L18 6M6 6l12 12"></path></svg>
