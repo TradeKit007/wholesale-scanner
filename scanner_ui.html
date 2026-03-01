@@ -1351,7 +1351,9 @@
                 // ---- Set Quantity Detection ----
                 function detectSetQty(title) {
                     if (!title) return 1;
-                    const patterns = [
+
+                    // Pattern 1: explicit number patterns (most reliable)
+                    const numPatterns = [
                         [/(\d+)\s*-\s*[Pp]ack/, null],
                         [/(\d+)\s*[Pp]ack\b/, null],
                         [/[Pp]ack\s+of\s+(\d+)/, null],
@@ -1363,14 +1365,25 @@
                         [/(\d+)\s*[Pp]k\b/i, null],
                         [/\((\d+)\s*[Pp]ack\)/, null],
                         [/[Bb]undle\s+of\s+(\d+)/, null],
+                        [/(\d+)\s*[Ii]tems?\b/, null],
                         [/[Tt]win\s*[Pp]ack/, 2],
                         [/[Tt]riple\s*[Pp]ack/, 3],
                         [/[Qq]uad\s*[Pp]ack/, 4],
                     ];
-                    for (const [rx, fixed] of patterns) {
+                    for (const [rx, fixed] of numPatterns) {
                         const m = title.match(rx);
                         if (m) return fixed !== null ? fixed : (parseInt(m[1]) || 1);
                     }
+
+                    // Pattern 2: "Noun & Noun Set" — count ampersands before "Set"
+                    // e.g. "Shampoo & Conditioner Set" → 2×
+                    // e.g. "Shampoo & Conditioner & Serum Set" → 3×
+                    const andSetMatch = title.match(/\w[\w\s,'-]{1,40}\s*(?:&\s*\w[\w\s,'-]{1,30})+\s+Set\b/i);
+                    if (andSetMatch) {
+                        const ampersandCount = (andSetMatch[0].match(/&/g) || []).length;
+                        if (ampersandCount >= 1) return ampersandCount + 1;
+                    }
+
                     return 1;
                 }
                 const setQty = detectSetQty(item.Title);
