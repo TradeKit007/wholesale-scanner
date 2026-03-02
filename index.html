@@ -31,6 +31,9 @@
             background: #161b22;
             border: 1px solid #30363d;
             border-radius: 12px;
+            max-height: calc(100vh - 220px);
+            overflow-y: auto;
+            overflow-x: auto;
         }
 
         thead th {
@@ -424,7 +427,7 @@
         </div>
         <div class="table-wrap overflow-x-auto mb-8">
             <table class="w-full text-left border-collapse" style="border-spacing:0">
-                <thead>
+                <thead style="position:sticky;top:0;z-index:20">
                     <tr style="background:#0d1117;color:#8b949e">
                         <th class="px-3 py-3 text-xs font-semibold align-top w-12 text-center uppercase tracking-wider">
                             <input type="checkbox" id="selectAllCheckbox" class="w-4 h-4 rounded cursor-pointer"
