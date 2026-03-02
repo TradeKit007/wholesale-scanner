@@ -320,190 +320,311 @@ function calcTargetPriceAndRoi(cost, itemPriceInfo, totalFee, prepFee) {
     return { calc_price, strategy, netProfit, roi };
 }
 
-async function getKeepaData(asin) {
-    if (!CONFIG.keepaApiKey) return null;
+// ─────────────────────────────────────────────────────────────
+//  KEEPA BATCH  (up to 100 ASINs per call)
+//  Returns map: asin → { rating, reviews, drops30, avg30,
+//                         pickAndPackFee, referralFeeDecimal }
+// ─────────────────────────────────────────────────────────────
+async function getKeepaDataBatch(asins) {
+    if (!CONFIG.keepaApiKey || asins.length === 0) return {};
 
-    try {
-        const url = `https://api.keepa.com/product?key=${CONFIG.keepaApiKey}&domain=1&asin=${asin}&stats=30&rating=1&buybox=1`;
-        const res = await axios.get(url, { validateStatus: () => true });
+    const KEEPA_CHUNK = 100; // Keepa Pro allows 100 per call
+    const results = {};
 
-        if (res.status !== 200 || res.data.error) {
-            console.warn(`[Keepa API Warning] ASIN: ${asin}. Code: ${res.data.error?.code}`);
-            return null;
-        }
+    for (let i = 0; i < asins.length; i += KEEPA_CHUNK) {
+        const chunk = asins.slice(i, i + KEEPA_CHUNK);
+        const url = `https://api.keepa.com/product?key=${CONFIG.keepaApiKey}&domain=1` +
+            `&asin=${chunk.join(',')}&stats=30&rating=1&buybox=1`;
+        try {
+            const res = await axios.get(url, { validateStatus: () => true, timeout: 30000 });
 
-        const product = res.data.products && res.data.products[0];
-        if (!product) return null;
-
-        let rating = null;
-        let drops30 = null;
-        let avg30Price = null;
-
-        if (product.stats) {
-            drops30 = typeof product.stats.salesRankDrops30 === 'number' ? product.stats.salesRankDrops30 : null;
-            if (product.stats.avg30) {
-                const bb = product.stats.avg30[18];
-                const newP = product.stats.avg30[1];
-                const amz = product.stats.avg30[0];
-                let val = -1;
-                if (bb >= 0) val = bb;
-                else if (newP >= 0) val = newP;
-                else if (amz >= 0) val = amz;
-
-                if (val > 0) avg30Price = (val / 100).toFixed(2);
+            if (res.status !== 200 || res.data.error) {
+                console.warn(`[Keepa Batch] Warning. Code: ${res.data.error?.code}`);
+                continue;
             }
-        }
 
-        if (product.csv && product.csv[16] && product.csv[16].length >= 2) {
-            const history = product.csv[16];
-            for (let i = history.length - 1; i >= 1; i -= 2) {
-                if (history[i] > 0) {
-                    rating = history[i] / 10;
-                    break;
+            const products = res.data.products || [];
+            console.log(`[Keepa Batch] Received ${products.length} products. Tokens left: ${res.data.tokensLeft}`);
+
+            for (const product of products) {
+                const asin = product.asin;
+                if (!asin) continue;
+
+                // ── Rating ──
+                let rating = null;
+                if (product.csv?.[16]?.length >= 2) {
+                    const h = product.csv[16];
+                    for (let j = h.length - 1; j >= 1; j -= 2) {
+                        if (h[j] > 0) { rating = h[j] / 10; break; }
+                    }
                 }
-            }
-        }
 
-        let reviews = null;
-        if (product.csv && product.csv[17] && product.csv[17].length >= 2) {
-            const history = product.csv[17];
-            for (let i = history.length - 1; i >= 1; i -= 2) {
-                if (history[i] >= 0) {
-                    reviews = history[i];
-                    break;
+                // ── Reviews ──
+                let reviews = null;
+                if (product.csv?.[17]?.length >= 2) {
+                    const h = product.csv[17];
+                    for (let j = h.length - 1; j >= 1; j -= 2) {
+                        if (h[j] >= 0) { reviews = h[j]; break; }
+                    }
                 }
+
+                // ── Drops & Avg30 ──
+                const drops30 = typeof product.stats?.salesRankDrops30 === 'number'
+                    ? product.stats.salesRankDrops30 : null;
+                let avg30Price = null;
+                if (product.stats?.avg30) {
+                    const a = product.stats.avg30;
+                    const val = a[18] >= 0 ? a[18] : a[1] >= 0 ? a[1] : a[0] >= 0 ? a[0] : -1;
+                    if (val > 0) avg30Price = (val / 100).toFixed(2);
+                }
+
+                // ── FBA Fees (NEW) ──
+                // pickAndPackFee: stored in cents (e.g. 504 = $5.04), -1 = unknown
+                const rawPickPack = product.fbaFees?.pickAndPackFee;
+                const pickAndPackFee = rawPickPack > 0 ? rawPickPack / 100 : null;
+
+                // referralFeePercent: Keepa stores as integer percentage × 100
+                // e.g. 1500 = 15.00%, 1501 = 15.01%  → divide by 10000 for decimal
+                const rawRefPct = product.referralFeePercent;
+                let referralFeeDecimal = null;
+                if (rawRefPct > 0) {
+                    // Heuristic: if value > 100, it's stored as percent×100 (e.g. 1500 = 15%)
+                    // If value <= 100, it's stored as plain percentage (e.g. 15 = 15%)
+                    referralFeeDecimal = rawRefPct > 100 ? rawRefPct / 10000 : rawRefPct / 100;
+                }
+
+                // ── Debug log for first product (helps verify format) ──
+                if (i === 0 && products.indexOf(product) === 0) {
+                    console.log(`[Keepa Fees Debug] ASIN: ${asin} | raw pickAndPack: ${rawPickPack} | raw referralPct: ${rawRefPct} | parsed: $${pickAndPackFee} + ${(referralFeeDecimal * 100)?.toFixed(2)}%`);
+                }
+
+                results[asin] = {
+                    rating: rating !== null ? rating.toFixed(1) : 'N/A',
+                    reviews: reviews !== null ? reviews : 'N/A',
+                    drops30: drops30 !== null ? drops30 : 'N/A',
+                    avg30: avg30Price !== null ? avg30Price : 'N/A',
+                    pickAndPackFee,       // dollars or null
+                    referralFeeDecimal,   // decimal (0.15) or null
+                };
             }
+        } catch (e) {
+            console.error('[Keepa Batch Error]', e.message);
         }
 
-        return {
-            rating: rating !== null ? rating.toFixed(1) : 'N/A',
-            reviews: reviews !== null ? reviews : 'N/A',
-            drops30: drops30 !== null ? drops30 : 'N/A',
-            avg30: avg30Price !== null ? avg30Price : 'N/A'
-        };
-    } catch (e) {
-        console.error('[Keepa Error]', e.message);
-        return null;
+        // Small pause between chunks (if more than 100 ASINs)
+        if (i + KEEPA_CHUNK < asins.length) await sleep(1000);
     }
+
+    return results;
+}
+
+// ─────────────────────────────────────────────────────────────
+//  SP API BATCH UPC → ASIN  (up to 20 UPCs per call)
+//  Returns map: upc → { asin, title, brand, main_bsr, category, bsrDrop, parentAsin }
+// ─────────────────────────────────────────────────────────────
+async function getAsinBatch(upcs, token) {
+    const results = {};
+    const BATCH = 20;
+
+    for (let i = 0; i < upcs.length; i += BATCH) {
+        const chunk = upcs.slice(i, i + BATCH);
+        const identifiers = chunk.join(',');
+        const path = `/catalog/2022-04-01/items?marketplaceIds=${CONFIG.marketplaceId}` +
+            `&identifiers=${identifiers}&identifiersType=UPC` +
+            `&includedData=salesRanks,summaries,relationships,identifiers`;
+
+        const res = await callSpApi('GET', path, null, token);
+
+        if (res.status === 200 && res.data.items) {
+            for (const item of res.data.items) {
+                const asin = item.asin;
+
+                // Match item back to input UPC via identifiers
+                let matchingUpc = null;
+                for (const idGroup of item.identifiers || []) {
+                    for (const id of idGroup.identifiers || []) {
+                        if (id.identifierType === 'UPC' && chunk.includes(id.identifier)) {
+                            matchingUpc = id.identifier;
+                            break;
+                        }
+                    }
+                    if (matchingUpc) break;
+                }
+                if (!matchingUpc) continue;
+
+                let title = 'N/A', brand = '';
+                if (item.summaries?.length > 0) {
+                    title = item.summaries[0].itemName || 'N/A';
+                    brand = item.summaries[0].brand || '';
+                }
+
+                let main_bsr = null, category = 'Unknown';
+                if (item.salesRanks?.length > 0) {
+                    const ranks = item.salesRanks[0].displayGroupRanks || [];
+                    for (const r of ranks) {
+                        if (r.websiteDisplayGroup) {
+                            main_bsr = r.rank;
+                            category = r.title || 'Unknown';
+                            break;
+                        }
+                    }
+                }
+
+                let parentAsin = null;
+                if (item.relationships?.length > 0) {
+                    const rels = item.relationships[0].relationships || [];
+                    const pRel = rels.find(r => r.type === 'VARIATION' && r.parentAsins?.length > 0);
+                    if (pRel) parentAsin = pRel.parentAsins[0];
+                }
+
+                results[matchingUpc] = {
+                    asin, title, brand, main_bsr, category,
+                    bsrDrop: analyzeBsr(main_bsr, category), parentAsin
+                };
+            }
+        } else {
+            console.warn(`[SP Batch] UPC batch ${i}–${i + BATCH} returned status ${res.status}`);
+        }
+
+        if (i + BATCH < upcs.length) await sleep(500); // SP API rate limit between batches
+    }
+
+    return results;
 }
 
 /**
- * Process a batch of rows.
- * @param {Array<{upc: string, cost: number}>} items 
+ * Process a batch of rows — OPTIMIZED (batch UPC→ASIN + Keepa batch + parallel prices).
+ * @param {Array<{upc: string, cost: number}>} items
  * @param {number} prepFee The cost per unit handling fee
  * @returns {Promise<{profitable: Array, problematic: Array}>}
  */
 async function processBatch(items, prepFee = 0.5, customBlacklist = []) {
+    // ── Fetch centralized blacklist ──
     let blacklist = customBlacklist || [];
     try {
         const blUrl = 'https://docs.google.com/spreadsheets/d/1XQz8RSSEnLZ3uih3jnB6ejFsw54LQOR_e-LPQzSlNPk/export?format=csv&gid=0';
         const blRes = await fetch(blUrl);
         if (blRes.ok) {
             const blText = await blRes.text();
-            const fetchedBlacklist = blText.split(/[\n,]/).map(b => b.trim().toLowerCase()).filter(b => b.length > 0 && b !== 'бренд');
-            blacklist = [...new Set([...blacklist.map(b => b.toLowerCase()), ...fetchedBlacklist])];
+            const fetched = blText.split(/[\n,]/).map(b => b.trim().toLowerCase()).filter(b => b.length > 0 && b !== 'бренд');
+            blacklist = [...new Set([...blacklist.map(b => b.toLowerCase()), ...fetched])];
         }
     } catch (err) {
-        console.warn('[Price Processor] Failed to fetch centralized blacklist:', err.message);
+        console.warn('[Price Processor] Failed to fetch blacklist:', err.message);
     }
 
-    console.log(`[Price Processor] Starting batch for ${items.length} items with prepFee=${prepFee}... Blacklist items: ${blacklist.length}`);
+    console.log(`[PriceProcessor] 🚀 BATCH START: ${items.length} items, prepFee=$${prepFee}, blacklist=${blacklist.length}`);
+    const t0 = Date.now();
 
     let token;
-    try {
-        token = await getAccessToken();
-    } catch (e) {
-        throw new Error(`Failed to get Amazon LWA Token: ${e.message}`);
-    }
+    try { token = await getAccessToken(); }
+    catch (e) { throw new Error(`Failed to get Amazon LWA Token: ${e.message}`); }
 
     const profitable = [];
     const problematic = [];
 
-    for (let i = 0; i < items.length; i++) {
-        const item = items[i];
-        const rawUpc = item.upc || '';
-        const itemNumber = item.itemNumber || '';
-        const cleanUpc = String(rawUpc).replace(/[\s-]/g, '');
+    // ── Validate UPCs ──
+    const validItems = [];
+    for (const item of items) {
+        const upc = String(item.upc || '').replace(/[\s-]/g, '');
         const cost = Number(item.cost) || 0;
-
-        const rowData = { UPC: cleanUpc, ItemNumber: itemNumber, Cost: cost };
-
-        if (!MIN_VALID_UPC_LENGTHS.includes(cleanUpc.length)) {
-            rowData.Problem = 'Invalid UPC length';
-            problematic.push(rowData);
-            continue;
+        const rowBase = { UPC: upc, ItemNumber: item.itemNumber || '', Cost: cost };
+        if (!MIN_VALID_UPC_LENGTHS.includes(upc.length)) {
+            rowBase.Problem = 'Invalid UPC length';
+            problematic.push(rowBase);
+        } else {
+            validItems.push({ ...item, _cleanUpc: upc });
         }
+    }
 
-        console.log(`Processing ${i + 1}/${items.length}: ${cleanUpc}`);
+    if (validItems.length === 0) return { profitable, problematic };
 
-        // 1. ASIN
-        const asinData = await getAsinAndBsr(cleanUpc, token);
-        if (asinData.error) {
-            rowData.Problem = asinData.error;
-            problematic.push(rowData);
-            await sleep(1000);
-            continue;
-        }
+    // ════════════════════════════════════════════
+    //  PHASE 1 — Batch UPC → ASIN  (20 per call)
+    // ════════════════════════════════════════════
+    const upcs = validItems.map(i => i._cleanUpc);
+    console.log(`[Phase 1] Batch UPC→ASIN lookup for ${upcs.length} UPCs...`);
+    const asinMap = await getAsinBatch(upcs, token);
+    console.log(`[Phase 1] ✅ Resolved ${Object.keys(asinMap).length}/${upcs.length} UPCs in ${((Date.now() - t0) / 1000).toFixed(1)}s`);
 
-        rowData.ASIN = asinData.asin;
-        rowData.ParentASIN = asinData.parentAsin || null;
-        rowData.Title = asinData.title;
-        rowData.Brand = asinData.brand || 'N/A';
-        rowData.Category = asinData.category;
-        rowData.BSR = asinData.main_bsr || 'N';
-        rowData.BSRDrop = asinData.bsrDrop;
+    // Separate items not found in catalog
+    const foundItems = validItems.filter(i => asinMap[i._cleanUpc]);
+    for (const i of validItems.filter(i => !asinMap[i._cleanUpc])) {
+        problematic.push({
+            UPC: i._cleanUpc, ItemNumber: i.itemNumber || '', Cost: Number(i.cost) || 0,
+            Problem: 'UPC not found in Catalog'
+        });
+    }
 
+    if (foundItems.length === 0) return { profitable, problematic };
+
+    // ════════════════════════════════════════════
+    //  PHASE 2 — Keepa BATCH: all ASINs in 1 call
+    //            → rating, drops, avg30, FBA fees
+    // ════════════════════════════════════════════
+    const asins = [...new Set(foundItems.map(i => asinMap[i._cleanUpc].asin))];
+    console.log(`[Phase 2] Keepa batch for ${asins.length} ASINs...`);
+    const keepaMap = CONFIG.keepaApiKey ? await getKeepaDataBatch(asins) : {};
+    console.log(`[Phase 2] ✅ Keepa done: ${Object.keys(keepaMap).length} products in ${((Date.now() - t0) / 1000).toFixed(1)}s`);
+
+    // ════════════════════════════════════════════
+    //  PHASE 3 — SP API Prices (parallel, 5 at a time)
+    // ════════════════════════════════════════════
+    const PARALLEL = 5;
+    const priceMap = {};
+    console.log(`[Phase 3] Fetching prices for ${asins.length} ASINs (${PARALLEL} parallel)...`);
+
+    for (let i = 0; i < asins.length; i += PARALLEL) {
+        const chunk = asins.slice(i, i + PARALLEL);
+        const results = await Promise.all(chunk.map(asin => getSmartPrice(asin, token).catch(e => ({ error: e.message }))));
+        chunk.forEach((asin, idx) => { priceMap[asin] = results[idx]; });
+        if (i + PARALLEL < asins.length) await sleep(300); // gentle rate limit
+    }
+    console.log(`[Phase 3] ✅ Prices done in ${((Date.now() - t0) / 1000).toFixed(1)}s`);
+
+    // ════════════════════════════════════════════
+    //  PHASE 4 — Compute ROI (pure JS, no API)
+    // ════════════════════════════════════════════
+    for (const item of foundItems) {
+        const upc = item._cleanUpc;
+        const cost = Number(item.cost) || 0;
+        const asinData = asinMap[upc];
+        const { asin } = asinData;
+        const keepa = keepaMap[asin] || {};
+        const priceData = priceMap[asin] || { error: 'Price not fetched' };
+
+        const rowData = {
+            UPC: upc, ItemNumber: item.itemNumber || '', Cost: cost,
+            ASIN: asin, ParentASIN: asinData.parentAsin || null,
+            Title: asinData.title, Brand: asinData.brand || 'N/A',
+            Category: asinData.category, BSR: asinData.main_bsr || 'N',
+            BSRDrop: asinData.bsrDrop,
+            KeepaRating: keepa.rating ?? 'N/A',
+            KeepaReviews: keepa.reviews ?? 'N/A',
+            KeepaDrops: keepa.drops30 ?? 'N/A',
+            KeepaAvg30: keepa.avg30 ?? 'N/A',
+        };
+
+        // Brand risk
         rowData.BrandRisk = 'Clear';
         if (blacklist.length > 0 && asinData.brand) {
-            const lowBrand = asinData.brand.toLowerCase();
-            const isRestricted = blacklist.some(b => lowBrand.includes(b) || b === lowBrand || lowBrand === b);
-            if (isRestricted) {
-                rowData.BrandRisk = 'Restricted';
-            }
+            const lb = asinData.brand.toLowerCase();
+            if (blacklist.some(b => lb.includes(b) || b === lb)) rowData.BrandRisk = 'Restricted';
         }
 
-        // 1.5 KEEPA (Rating & Drops & Avg30)
-        if (CONFIG.keepaApiKey) {
-            const keepaData = await getKeepaData(asinData.asin);
-            if (keepaData) {
-                rowData.KeepaRating = keepaData.rating;
-                rowData.KeepaReviews = keepaData.reviews;
-                rowData.KeepaDrops = keepaData.drops30;
-                rowData.KeepaAvg30 = keepaData.avg30;
-            } else {
-                rowData.KeepaRating = 'N/A';
-                rowData.KeepaReviews = 'N/A';
-                rowData.KeepaDrops = 'N/A';
-                rowData.KeepaAvg30 = 'N/A';
-            }
-            await sleep(500); // safety pause for Keepa
-        } else {
-            rowData.KeepaRating = 'No Key';
-            rowData.KeepaReviews = 'No Key';
-            rowData.KeepaDrops = 'No Key';
-            rowData.KeepaAvg30 = 'No Key';
-        }
-
-        // 2. Price
-        const priceData = await getSmartPrice(asinData.asin, token);
+        // ── Price ──
         if (priceData.error) {
-            if (priceData.error === "Currently unavailable (OOS)") {
-                // Return in profitable table to indicate opportunity
-                rowData.BuyBoxPrice = 0;
-                rowData.Strategy = "Currently unavailable";
-                rowData.CalcPrice = 0;
-                rowData.OffersCount = 0;
-                rowData.NetProfit = 0;
-                rowData.ROI = 0;
+            if (priceData.error === 'Currently unavailable (OOS)') {
+                Object.assign(rowData, {
+                    BuyBoxPrice: 0, Strategy: 'Currently unavailable',
+                    CalcPrice: 0, OffersCount: 0, NetProfit: 0, ROI: 0
+                });
                 profitable.push(rowData);
-                await sleep(1000);
-                continue;
             } else {
                 rowData.Problem = priceData.error;
                 problematic.push(rowData);
-                await sleep(1000);
-                continue;
             }
+            continue;
         }
 
         rowData.BuyBoxPrice = priceData.bb_price;
@@ -511,40 +632,39 @@ async function processBatch(items, prepFee = 0.5, customBlacklist = []) {
         rowData.CalcPrice = priceData.price;
         rowData.OffersCount = priceData.offersCount || 0;
 
-        // 3. Fees
-        const feeData = await getFees(asinData.asin, priceData.price, token);
-        if (feeData.error) {
-            rowData.Problem = feeData.error;
-            problematic.push(rowData);
-            await sleep(1000);
-            continue;
+        // ── FBA Fees: Keepa first, SP API fallback ──
+        let totalFee;
+        if (keepa.pickAndPackFee !== null && keepa.pickAndPackFee !== undefined &&
+            keepa.referralFeeDecimal !== null && keepa.referralFeeDecimal !== undefined) {
+            const referralFee = keepa.referralFeeDecimal * priceData.price;
+            totalFee = keepa.pickAndPackFee + referralFee;
+            rowData.FeesSource = 'Keepa';
+            console.log(`[Fees/Keepa] ${asin}: pick&pack=$${keepa.pickAndPackFee.toFixed(2)}, referral=${(keepa.referralFeeDecimal * 100).toFixed(2)}%=$${referralFee.toFixed(2)}, total=$${totalFee.toFixed(2)}`);
+        } else {
+            // Fallback: individual SP API fee call
+            const feeData = await getFees(asin, priceData.price, token);
+            if (feeData.error) { rowData.Problem = feeData.error; problematic.push(rowData); continue; }
+            totalFee = feeData.fee;
+            rowData.FeesSource = 'SP API';
         }
 
-        rowData.AmazonFees = feeData.fee;
+        rowData.AmazonFees = Number(totalFee.toFixed(2));
 
-        // 4. ROI
-        // Here we just use the priceData and feeData that we got above
-        const payout = priceData.price - feeData.fee;
+        // ── ROI ──
+        const payout = priceData.price - totalFee;
         const netProfit = payout - cost - prepFee;
-        let roi = 0;
-        if (cost > 0) {
-            roi = (netProfit / cost) * 100;
-        }
+        const roi = cost > 0 ? (netProfit / cost) * 100 : 0;
 
         rowData.PrepFee = prepFee;
         rowData.NetProfit = Number(netProfit.toFixed(2));
         rowData.ROI = Number(roi.toFixed(2));
 
-        if (netProfit > 0) {
-            profitable.push(rowData);
-        } else {
-            rowData.Problem = 'Negative or Zero Net Profit';
-            problematic.push(rowData);
-        }
-
-        await sleep(1000); // SP API Rate Limiting protection
+        if (netProfit > 0) profitable.push(rowData);
+        else { rowData.Problem = 'Negative or Zero Net Profit'; problematic.push(rowData); }
     }
 
+    const elapsed = ((Date.now() - t0) / 1000).toFixed(1);
+    console.log(`[PriceProcessor] ✅ DONE in ${elapsed}s — profitable: ${profitable.length}, problematic: ${problematic.length}`);
     return { profitable, problematic };
 }
 
