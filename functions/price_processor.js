@@ -321,85 +321,126 @@ function calcTargetPriceAndRoi(cost, itemPriceInfo, totalFee, prepFee) {
 }
 
 // ─────────────────────────────────────────────────────────────
-//  KEEPA BATCH  (up to 100 ASINs per call)
-//  Returns map: asin → { rating, reviews, drops30, avg30,
-//                         pickAndPackFee, referralFeeDecimal }
+//  KEEPA BATCH
+//  KEY: we use stats=0 (no expensive precomputed stats)
+//       and compute BSR drops ourselves from csv[3] history.
+//  Token cost: ~2-3 per ASIN (was ~34 with stats=30!)
 // ─────────────────────────────────────────────────────────────
+
+// Keepa timestamps are minutes since 2011-01-01 00:00 UTC.
+const KEEPA_EPOCH_MIN = Math.floor(Date.UTC(2011, 0, 1) / 60000);
+
+function keepaMinutesToMs(km) { return (km + KEEPA_EPOCH_MIN) * 60000; }
+
+function countBsrDrops30(bsrCsv) {
+    if (!bsrCsv || bsrCsv.length < 4) return null;
+    const cutoffMs = Date.now() - 30 * 24 * 3600 * 1000;
+    let drops = 0;
+    let prevBsr = null;
+    for (let i = 0; i < bsrCsv.length - 1; i += 2) {
+        if (keepaMinutesToMs(bsrCsv[i]) < cutoffMs) continue;
+        const bsr = bsrCsv[i + 1];
+        if (bsr < 0) continue; // -1 = no data
+        if (prevBsr !== null && bsr < prevBsr) drops++;
+        prevBsr = bsr;
+    }
+    return drops;
+}
+
+function avgPrice30FromCsv(priceCsv) {
+    if (!priceCsv || priceCsv.length < 4) return null;
+    const cutoffMs = Date.now() - 30 * 24 * 3600 * 1000;
+    let sum = 0, count = 0;
+    for (let i = 0; i < priceCsv.length - 1; i += 2) {
+        if (keepaMinutesToMs(priceCsv[i]) < cutoffMs) continue;
+        const p = priceCsv[i + 1];
+        if (p > 0) { sum += p; count++; }
+    }
+    return count > 0 ? (sum / count / 100).toFixed(2) : null;
+}
+
 async function getKeepaDataBatch(asins) {
     if (!CONFIG.keepaApiKey || asins.length === 0) return {};
 
-    const KEEPA_CHUNK = 100; // Keepa Pro allows 100 per call
+    const KEEPA_CHUNK = 20;  // Smaller chunks = less tokens per call
     const results = {};
 
     for (let i = 0; i < asins.length; i += KEEPA_CHUNK) {
         const chunk = asins.slice(i, i + KEEPA_CHUNK);
+        // stats=0 → no precomputed stats (saves ~30 tokens/product!)
+        // rating=1 → only to get csv[16]+csv[17] (rating/reviews history)
+        // buybox=1 → current buy box data
         const url = `https://api.keepa.com/product?key=${CONFIG.keepaApiKey}&domain=1` +
-            `&asin=${chunk.join(',')}&stats=30&rating=1&buybox=1`;
+            `&asin=${chunk.join(',')}&stats=0&rating=1&buybox=1`;
         try {
-            const res = await axios.get(url, { validateStatus: () => true, timeout: 30000 });
+            const res = await axios.get(url, { validateStatus: () => true, timeout: 45000 });
 
             if (res.status !== 200 || res.data.error) {
-                console.warn(`[Keepa Batch] Warning. Code: ${res.data.error?.code}`);
+                console.warn(`[Keepa Batch] Warning chunk ${i}: status=${res.status} code=${res.data.error?.code}`);
+                // If 429 Token Limit, wait before continuing
+                if (res.data.error?.code === 429 || res.status === 429) {
+                    console.warn('[Keepa Batch] ⛔ Rate limit hit — waiting 60s...');
+                    await sleep(60000);
+                }
                 continue;
             }
 
+            const tokensLeft = res.data.tokensLeft ?? 'unknown';
             const products = res.data.products || [];
-            console.log(`[Keepa Batch] Received ${products.length} products. Tokens left: ${res.data.tokensLeft}`);
+            console.log(`[Keepa Batch] chunk ${i / KEEPA_CHUNK + 1}: ${products.length} products, tokensLeft=${tokensLeft}`);
+
+            // ⚠️ If tokens are getting low, pause to let them regenerate
+            if (typeof tokensLeft === 'number' && tokensLeft < 150) {
+                const waitSec = Math.min(120, Math.max(15, (200 - tokensLeft)));
+                console.warn(`[Keepa Batch] ⚠️ Low tokens (${tokensLeft}) — waiting ${waitSec}s...`);
+                await sleep(waitSec * 1000);
+            }
 
             for (const product of products) {
                 const asin = product.asin;
                 if (!asin) continue;
 
-                // ── Rating ──
+                // ── Current Rating (from current csv[16]) ──
                 let rating = null;
-                if (product.csv?.[16]?.length >= 2) {
+                if (product.stats?.current?.[16] > 0) {
+                    rating = product.stats.current[16] / 10;
+                } else if (product.csv?.[16]?.length >= 2) {
                     const h = product.csv[16];
                     for (let j = h.length - 1; j >= 1; j -= 2) {
                         if (h[j] > 0) { rating = h[j] / 10; break; }
                     }
                 }
 
-                // ── Reviews ──
+                // ── Current Reviews ──
                 let reviews = null;
-                if (product.csv?.[17]?.length >= 2) {
+                if (product.stats?.current?.[17] >= 0) {
+                    reviews = product.stats.current[17];
+                } else if (product.csv?.[17]?.length >= 2) {
                     const h = product.csv[17];
                     for (let j = h.length - 1; j >= 1; j -= 2) {
                         if (h[j] >= 0) { reviews = h[j]; break; }
                     }
                 }
 
-                // ── Drops & Avg30 ──
-                const drops30 = typeof product.stats?.salesRankDrops30 === 'number'
-                    ? product.stats.salesRankDrops30 : null;
-                let avg30Price = null;
-                if (product.stats?.avg30) {
-                    const a = product.stats.avg30;
-                    const val = a[18] >= 0 ? a[18] : a[1] >= 0 ? a[1] : a[0] >= 0 ? a[0] : -1;
-                    if (val > 0) avg30Price = (val / 100).toFixed(2);
-                }
+                // ── BSR Drops (computed from raw csv[3] history) ──
+                const drops30 = countBsrDrops30(product.csv?.[3]);
 
-                // ── FBA Fees (NEW) ──
-                // pickAndPackFee: stored in cents (e.g. 504 = $5.04), -1 = unknown
+                // ── Avg30 Price (computed from raw csv history) ──
+                // Try Buy Box (csv[18]), then New (csv[1]), then Amazon (csv[0])
+                const avg30Price = avgPrice30FromCsv(product.csv?.[18])
+                    || avgPrice30FromCsv(product.csv?.[1])
+                    || avgPrice30FromCsv(product.csv?.[0]);
+
+                // ── FBA Fees ──
                 const rawPickPack = product.fbaFees?.pickAndPackFee;
                 const pickAndPackFee = rawPickPack > 0 ? rawPickPack / 100 : null;
-
-                // referralFeePercent: Keepa stores as integer percentage × 100
-                // e.g. 1500 = 15.00%, 1501 = 15.01%  → divide by 10000 for decimal
                 const rawRefPct = product.referralFeePercent;
                 let referralFeeDecimal = null;
                 if (rawRefPct > 0) {
-                    // Heuristic: if value > 100, it's stored as percent×100 (e.g. 1500 = 15%)
-                    // If value <= 100, it's stored as plain percentage (e.g. 15 = 15%)
                     referralFeeDecimal = rawRefPct > 100 ? rawRefPct / 10000 : rawRefPct / 100;
                 }
 
-                // ── Debug log for first product (helps verify format) ──
-                if (i === 0 && products.indexOf(product) === 0) {
-                    console.log(`[Keepa Fees Debug] ASIN: ${asin} | raw pickAndPack: ${rawPickPack} | raw referralPct: ${rawRefPct} | parsed: $${pickAndPackFee} + ${(referralFeeDecimal * 100)?.toFixed(2)}%`);
-                }
-
-                // ── Current Buy Box Price from Keepa (replaces SP API getSmartPrice!) ──
-                // stats.current[18] = Buy Box price in cents; [0] = Amazon price in cents
+                // ── Current Buy Box & Amazon Price ──
                 let currentBBPrice = null;
                 let amazonPrice = null;
                 let currentOffersCount = null;
@@ -412,30 +453,32 @@ async function getKeepaDataBatch(asins) {
                     currentOffersCount = product.offersSuccessful;
                 }
 
+                // Debug (first product only)
+                if (i === 0 && products.indexOf(product) === 0) {
+                    console.log(`[Keepa Debug] ASIN:${asin} | P&P:${rawPickPack} | refPct:${rawRefPct} | BBprice:${currentBBPrice} | drops30:${drops30}`);
+                }
+
                 results[asin] = {
                     rating: rating !== null ? rating.toFixed(1) : 'N/A',
                     reviews: reviews !== null ? reviews : 'N/A',
                     drops30: drops30 !== null ? drops30 : 'N/A',
-                    avg30: avg30Price !== null ? avg30Price : 'N/A',
-                    pickAndPackFee,
-                    referralFeeDecimal,
-                    currentBBPrice,    // ← now used in Phase 3 instead of SP API
-                    amazonPrice,       // ← non-null = Amazon is selling
-                    currentOffersCount,
+                    avg30: avg30Price ? avg30Price : 'N/A',
+                    pickAndPackFee, referralFeeDecimal,
+                    currentBBPrice, amazonPrice, currentOffersCount,
                 };
             }
         } catch (e) {
             console.error('[Keepa Batch Error]', e.message);
         }
 
-        // Small pause between chunks (if more than 100 ASINs)
-        if (i + KEEPA_CHUNK < asins.length) await sleep(1000);
+        if (i + KEEPA_CHUNK < asins.length) await sleep(500);
     }
 
     return results;
 }
 
 // ─────────────────────────────────────────────────────────────
+
 //  SP API BATCH UPC → ASIN  (up to 20 UPCs per call)
 //  Returns map: upc → { asin, title, brand, main_bsr, category, bsrDrop, parentAsin }
 // ─────────────────────────────────────────────────────────────
