@@ -398,13 +398,30 @@ async function getKeepaDataBatch(asins) {
                     console.log(`[Keepa Fees Debug] ASIN: ${asin} | raw pickAndPack: ${rawPickPack} | raw referralPct: ${rawRefPct} | parsed: $${pickAndPackFee} + ${(referralFeeDecimal * 100)?.toFixed(2)}%`);
                 }
 
+                // ── Current Buy Box Price from Keepa (replaces SP API getSmartPrice!) ──
+                // stats.current[18] = Buy Box price in cents; [0] = Amazon price in cents
+                let currentBBPrice = null;
+                let amazonPrice = null;
+                let currentOffersCount = null;
+                if (product.stats?.current) {
+                    const curr = product.stats.current;
+                    if (curr[18] > 0) currentBBPrice = curr[18] / 100;
+                    if (curr[0] > 0) amazonPrice = curr[0] / 100;
+                }
+                if (typeof product.offersSuccessful === 'number') {
+                    currentOffersCount = product.offersSuccessful;
+                }
+
                 results[asin] = {
                     rating: rating !== null ? rating.toFixed(1) : 'N/A',
                     reviews: reviews !== null ? reviews : 'N/A',
                     drops30: drops30 !== null ? drops30 : 'N/A',
                     avg30: avg30Price !== null ? avg30Price : 'N/A',
-                    pickAndPackFee,       // dollars or null
-                    referralFeeDecimal,   // decimal (0.15) or null
+                    pickAndPackFee,
+                    referralFeeDecimal,
+                    currentBBPrice,    // ← now used in Phase 3 instead of SP API
+                    amazonPrice,       // ← non-null = Amazon is selling
+                    currentOffersCount,
                 };
             }
         } catch (e) {
@@ -568,19 +585,42 @@ async function processBatch(items, prepFee = 0.5, customBlacklist = []) {
     console.log(`[Phase 2] ✅ Keepa done: ${Object.keys(keepaMap).length} products in ${((Date.now() - t0) / 1000).toFixed(1)}s`);
 
     // ════════════════════════════════════════════
-    //  PHASE 3 — SP API Prices (parallel, 5 at a time)
+    //  PHASE 3 — Price: Keepa first (no SP API!)
+    //            SP API getSmartPrice only for fallback
     // ════════════════════════════════════════════
-    const PARALLEL = 5;
     const priceMap = {};
-    console.log(`[Phase 3] Fetching prices for ${asins.length} ASINs (${PARALLEL} parallel)...`);
+    const needSpPrice = [];
 
-    for (let i = 0; i < asins.length; i += PARALLEL) {
-        const chunk = asins.slice(i, i + PARALLEL);
-        const results = await Promise.all(chunk.map(asin => getSmartPrice(asin, token).catch(e => ({ error: e.message }))));
-        chunk.forEach((asin, idx) => { priceMap[asin] = results[idx]; });
-        if (i + PARALLEL < asins.length) await sleep(300); // gentle rate limit
+    for (const asin of asins) {
+        const k = keepaMap[asin] || {};
+        if (k.currentBBPrice && k.currentBBPrice > 0) {
+            // ✅ Use Keepa Buy Box — zero SP API calls
+            const hasAmz = k.amazonPrice && k.amazonPrice > 0;
+            priceMap[asin] = {
+                price: k.currentBBPrice,
+                bb_price: k.currentBBPrice,
+                strategy: hasAmz ? 'Match BB (Amazon)' : 'Match BB FBA',
+                offersCount: k.currentOffersCount || 0,
+            };
+        } else {
+            needSpPrice.push(asin); // No Keepa price → SP API fallback
+        }
     }
-    console.log(`[Phase 3] ✅ Prices done in ${((Date.now() - t0) / 1000).toFixed(1)}s`);
+
+    if (needSpPrice.length > 0) {
+        const PARALLEL = 5;
+        console.log(`[Phase 3] Keepa missing price for ${needSpPrice.length}/${asins.length} ASINs → SP API fallback...`);
+        for (let i = 0; i < needSpPrice.length; i += PARALLEL) {
+            const chunk = needSpPrice.slice(i, i + PARALLEL);
+            const results = await Promise.all(chunk.map(a => getSmartPrice(a, token).catch(e => ({ error: e.message }))));
+            chunk.forEach((a, idx) => { priceMap[a] = results[idx]; });
+            if (i + PARALLEL < needSpPrice.length) await sleep(300);
+        }
+    }
+
+    const fromKeepa = asins.length - needSpPrice.length;
+    const fromSpApi = needSpPrice.length;
+    console.log(`[Phase 3] ✅ Prices: ${fromKeepa} from Keepa (0 API calls), ${fromSpApi} from SP API | total ${((Date.now() - t0) / 1000).toFixed(1)}s`);
 
     // ════════════════════════════════════════════
     //  PHASE 4 — Compute ROI (pure JS, no API)
