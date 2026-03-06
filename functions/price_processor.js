@@ -323,8 +323,8 @@ function calcTargetPriceAndRoi(cost, itemPriceInfo, totalFee, prepFee) {
 // ─────────────────────────────────────────────────────────────
 //  KEEPA BATCH
 //  KEY: we use stats=0 (no expensive precomputed stats)
-//       and compute BSR drops ourselves from csv[3] history.
-//  Token cost: ~2-3 per ASIN (was ~34 with stats=30!)
+//       offers=20 gives FBA fees & buybox price at 0 extra cost.
+//  Token cost: EXACTLY 1 per ASIN (was ~34 with stats=30!)
 // ─────────────────────────────────────────────────────────────
 
 // Keepa timestamps are minutes since 2011-01-01 00:00 UTC.
@@ -367,31 +367,30 @@ async function getKeepaDataBatch(asins) {
 
     for (let i = 0; i < asins.length; i += KEEPA_CHUNK) {
         const chunk = asins.slice(i, i + KEEPA_CHUNK);
-        // stats=0 → no precomputed stats (saves ~30 tokens/product!)
-        // rating=1 → only to get csv[16]+csv[17] (rating/reviews history)
-        // buybox=1 → current buy box data
+        // stats=0 → no precomputed stats
+        // offers=20 → includes BB price, FBA fees, and success offers WITHOUT costing 5 tokens like buybox=1 does!
         const url = `https://api.keepa.com/product?key=${CONFIG.keepaApiKey}&domain=1` +
-            `&asin=${chunk.join(',')}&stats=0&rating=1&buybox=1`;
+            `&asin=${chunk.join(',')}&stats=0&rating=1&offers=20`;
         try {
             const res = await axios.get(url, { validateStatus: () => true, timeout: 45000 });
 
             if (res.status !== 200 || res.data.error) {
                 console.warn(`[Keepa Batch] Warning chunk ${i}: status=${res.status} code=${res.data.error?.code}`);
-                // If 429 Token Limit, wait before continuing
                 if (res.data.error?.code === 429 || res.status === 429) {
                     console.warn('[Keepa Batch] ⛔ Rate limit hit — waiting 60s...');
                     await sleep(60000);
+                    i -= KEEPA_CHUNK; // Retry same chunk
                 }
                 continue;
             }
 
-            const tokensLeft = res.data.tokensLeft ?? 'unknown';
+            const tokensLeft = res.data.tokensLeft ?? 300;
+            const consumed = res.data.tokensConsumed ?? 0;
             const products = res.data.products || [];
-            console.log(`[Keepa Batch] chunk ${i / KEEPA_CHUNK + 1}: ${products.length} products, tokensLeft=${tokensLeft}`);
+            console.log(`[Keepa Batch] chunk ${i / KEEPA_CHUNK + 1}: ${products.length} products, tokensLeft=${tokensLeft}, consumed=${consumed}`);
 
-            // ⚠️ If tokens are getting low, pause to let them regenerate
-            if (typeof tokensLeft === 'number' && tokensLeft < 150) {
-                const waitSec = Math.min(120, Math.max(15, (200 - tokensLeft)));
+            if (tokensLeft < 60) {
+                const waitSec = Math.min(120, Math.max(20, (300 - tokensLeft) * 1.5));
                 console.warn(`[Keepa Batch] ⚠️ Low tokens (${tokensLeft}) — waiting ${waitSec}s...`);
                 await sleep(waitSec * 1000);
             }
@@ -400,33 +399,23 @@ async function getKeepaDataBatch(asins) {
                 const asin = product.asin;
                 if (!asin) continue;
 
-                // ── Current Rating (from current csv[16]) ──
-                let rating = null;
-                if (product.stats?.current?.[16] > 0) {
-                    rating = product.stats.current[16] / 10;
-                } else if (product.csv?.[16]?.length >= 2) {
+                // ── Rating & Reviews ──
+                let rating = null, reviews = null;
+                if (product.csv?.[16]?.length >= 2) {
                     const h = product.csv[16];
                     for (let j = h.length - 1; j >= 1; j -= 2) {
                         if (h[j] > 0) { rating = h[j] / 10; break; }
                     }
                 }
-
-                // ── Current Reviews ──
-                let reviews = null;
-                if (product.stats?.current?.[17] >= 0) {
-                    reviews = product.stats.current[17];
-                } else if (product.csv?.[17]?.length >= 2) {
+                if (product.csv?.[17]?.length >= 2) {
                     const h = product.csv[17];
                     for (let j = h.length - 1; j >= 1; j -= 2) {
                         if (h[j] >= 0) { reviews = h[j]; break; }
                     }
                 }
 
-                // ── BSR Drops (computed from raw csv[3] history) ──
+                // ── BSR Drops & Avg Price ──
                 const drops30 = countBsrDrops30(product.csv?.[3]);
-
-                // ── Avg30 Price (computed from raw csv history) ──
-                // Try Buy Box (csv[18]), then New (csv[1]), then Amazon (csv[0])
                 const avg30Price = avgPrice30FromCsv(product.csv?.[18])
                     || avgPrice30FromCsv(product.csv?.[1])
                     || avgPrice30FromCsv(product.csv?.[0]);
@@ -443,26 +432,31 @@ async function getKeepaDataBatch(asins) {
                 // ── Current Buy Box & Amazon Price ──
                 let currentBBPrice = null;
                 let amazonPrice = null;
-                let currentOffersCount = null;
-                if (product.stats?.current) {
-                    const curr = product.stats.current;
-                    if (curr[18] > 0) currentBBPrice = curr[18] / 100;
-                    if (curr[0] > 0) amazonPrice = curr[0] / 100;
-                }
-                if (typeof product.offersSuccessful === 'number') {
-                    currentOffersCount = product.offersSuccessful;
+
+                // Without stats=X, we read the LAST value from CSV arrays:
+                // csv[18] = Buy Box. The last index is the price (integer cents).
+                if (product.csv?.[18]?.length >= 2) {
+                    const bbarr = product.csv[18];
+                    for (let k = bbarr.length - 1; k >= 1; k -= 2) {
+                        if (bbarr[k] > 0) { currentBBPrice = bbarr[k] / 100; break; }
+                    }
                 }
 
-                // Debug (first product only)
-                if (i === 0 && products.indexOf(product) === 0) {
-                    console.log(`[Keepa Debug] ASIN:${asin} | P&P:${rawPickPack} | refPct:${rawRefPct} | BBprice:${currentBBPrice} | drops30:${drops30}`);
+                // csv[0] = Amazon
+                if (product.csv?.[0]?.length >= 2) {
+                    const amzarr = product.csv[0];
+                    for (let k = amzarr.length - 1; k >= 1; k -= 2) {
+                        if (amzarr[k] > 0) { amazonPrice = amzarr[k] / 100; break; }
+                    }
                 }
+
+                let currentOffersCount = product.offersSuccessful || 0;
 
                 results[asin] = {
                     rating: rating !== null ? rating.toFixed(1) : 'N/A',
                     reviews: reviews !== null ? reviews : 'N/A',
                     drops30: drops30 !== null ? drops30 : 'N/A',
-                    avg30: avg30Price ? avg30Price : 'N/A',
+                    avg30: avg30Price !== null ? avg30Price : 'N/A',
                     pickAndPackFee, referralFeeDecimal,
                     currentBBPrice, amazonPrice, currentOffersCount,
                 };
@@ -754,3 +748,4 @@ async function processBatch(items, prepFee = 0.5, customBlacklist = []) {
 module.exports = {
     processBatch
 };
+// DEPLOY TRIGGER Fri Mar  6 17:01:22 EET 2026
