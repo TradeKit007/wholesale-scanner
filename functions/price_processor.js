@@ -376,10 +376,20 @@ async function getKeepaDataBatch(asins) {
 
             if (res.status !== 200 || res.data.error) {
                 console.warn(`[Keepa Batch] Warning chunk ${i}: status=${res.status} code=${res.data.error?.code}`);
+
+                // If 429 Too Many Requests (Token Limit Reached) -> check exactly how long to wait
                 if (res.data.error?.code === 429 || res.status === 429) {
-                    console.warn('[Keepa Batch] ⛔ Rate limit hit — waiting 60s...');
-                    await sleep(60000);
-                    i -= KEEPA_CHUNK; // Retry same chunk
+                    const refillInMs = res.data.refillIn || 60000;
+                    const tokensLeft = res.data.tokensLeft ?? 'unknown';
+
+                    if (refillInMs > 30000 || (typeof tokensLeft === 'number' && tokensLeft < -10)) {
+                        console.warn(`[Keepa Batch] ⛔ API Limit (${tokensLeft} tokens). Refill takes ${(refillInMs / 1000).toFixed(1)}s. Too long to wait! Skipping Keepa and falling back to Amazon SP API.`);
+                        break; // Exit Keepa immediately, use SP API fallback for all remaining items
+                    } else {
+                        console.warn(`[Keepa Batch] ⛔ Rate limit hit. Waiting ${(refillInMs / 1000).toFixed(1)}s for tokens to refill...`);
+                        await sleep(refillInMs + 1000); // Wait until refill + 1s buffer
+                        i -= KEEPA_CHUNK; // Retry same chunk
+                    }
                 }
                 continue;
             }
@@ -389,9 +399,10 @@ async function getKeepaDataBatch(asins) {
             const products = res.data.products || [];
             console.log(`[Keepa Batch] chunk ${i / KEEPA_CHUNK + 1}: ${products.length} products, tokensLeft=${tokensLeft}, consumed=${consumed}`);
 
+            // ⚠️ If tokens are getting low, pause briefly to let them regenerate, but max 30s to prevent timeout
             if (tokensLeft < 60) {
-                const waitSec = Math.min(120, Math.max(20, (300 - tokensLeft) * 1.5));
-                console.warn(`[Keepa Batch] ⚠️ Low tokens (${tokensLeft}) — waiting ${waitSec}s...`);
+                const waitSec = Math.min(30, Math.max(10, (100 - tokensLeft) * 1.5));
+                console.warn(`[Keepa Batch] ⚠️ Low tokens (${tokensLeft}) — pausing ${waitSec}s to regenerate...`);
                 await sleep(waitSec * 1000);
             }
 
