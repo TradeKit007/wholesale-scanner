@@ -403,13 +403,15 @@ async function getKeepaDataBatch(asins) {
                 let rating = null, reviews = null;
                 if (product.csv?.[16]?.length >= 2) {
                     const h = product.csv[16];
-                    for (let j = h.length - 1; j >= 1; j -= 2) {
+                    const startK = (h.length - 1) % 2 === 1 ? (h.length - 1) : (h.length - 2);
+                    for (let j = startK; j >= 1; j -= 2) {
                         if (h[j] > 0) { rating = h[j] / 10; break; }
                     }
                 }
                 if (product.csv?.[17]?.length >= 2) {
                     const h = product.csv[17];
-                    for (let j = h.length - 1; j >= 1; j -= 2) {
+                    const startK = (h.length - 1) % 2 === 1 ? (h.length - 1) : (h.length - 2);
+                    for (let j = startK; j >= 1; j -= 2) {
                         if (h[j] >= 0) { reviews = h[j]; break; }
                     }
                 }
@@ -434,10 +436,12 @@ async function getKeepaDataBatch(asins) {
                 let amazonPrice = null;
 
                 // Without stats=X, we read the LAST value from CSV arrays:
-                // csv[18] = Buy Box. The last index is the price (integer cents).
+                // csv[18] = Buy Box. The last odd index is the price (integer cents).
                 if (product.csv?.[18]?.length >= 2) {
                     const bbarr = product.csv[18];
-                    for (let k = bbarr.length - 1; k >= 1; k -= 2) {
+                    const startK = (bbarr.length - 1) % 2 === 1 ? (bbarr.length - 1) : (bbarr.length - 2);
+                    for (let k = startK; k >= 1; k -= 2) {
+                        // Some values might be -1 if out of stock
                         if (bbarr[k] > 0) { currentBBPrice = bbarr[k] / 100; break; }
                     }
                 }
@@ -445,7 +449,8 @@ async function getKeepaDataBatch(asins) {
                 // csv[0] = Amazon
                 if (product.csv?.[0]?.length >= 2) {
                     const amzarr = product.csv[0];
-                    for (let k = amzarr.length - 1; k >= 1; k -= 2) {
+                    const startK = (amzarr.length - 1) % 2 === 1 ? (amzarr.length - 1) : (amzarr.length - 2);
+                    for (let k = startK; k >= 1; k -= 2) {
                         if (amzarr[k] > 0) { amazonPrice = amzarr[k] / 100; break; }
                     }
                 }
