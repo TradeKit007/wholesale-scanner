@@ -1676,7 +1676,7 @@
                 return;
             }
 
-            let csvContent = "UPC,Item Number,ASIN,Variation Family,Title,Brand,Brand Risk,Cost,BSR,Keepa Rating,Keepa Reviews,Keepa Drops,Offers Count,Strategy,Target Price,Avg 30d,Net Profit,ROI%\n";
+            let csvContent = "UPC,Item Number,ASIN,Amazon Link,Variation Family,Title,Brand,Brand Risk,Cost,BSR,Keepa Rating,Keepa Reviews,Keepa Drops,Offers Count,Strategy,Target Price,Avg 30d,Net Profit,ROI%\n";
 
             checkedRows.forEach(tr => {
                 const upc = tr.dataset.upc;
@@ -1698,7 +1698,9 @@
                 const profit = tr.dataset.profit;
                 const roi = tr.dataset.roi;
 
-                csvContent += `${upc},${itemNumber},${asin},${variation},${title},${brand},${brandRisk},${cost},${bsr},${rating},${reviews},${drops},${offersCount},${strategy},${price},${avg30},${profit},${roi}\n`;
+                const amazonUrl = `https://www.amazon.com/dp/${asin}`;
+
+                csvContent += `${upc},${itemNumber},${asin},${amazonUrl},${variation},${title},${brand},${brandRisk},${cost},${bsr},${rating},${reviews},${drops},${offersCount},${strategy},${price},${avg30},${profit},${roi}\n`;
             });
 
             // Trigger File Download
