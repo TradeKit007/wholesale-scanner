@@ -596,10 +596,12 @@ async function getAsinBatch(upcs, token) {
                     if (pRel) parentAsin = pRel.parentAsins[0];
                 }
 
-                results[matchingUpc] = {
+                // Store ALL matches per UPC → allows multiple Amazon listings per barcode
+                if (!results[matchingUpc]) results[matchingUpc] = [];
+                results[matchingUpc].push({
                     asin, title, brand, main_bsr, category,
                     bsrDrop: analyzeBsr(main_bsr, category), parentAsin
-                };
+                });
             }
         } else {
             console.warn(`[SP Batch] UPC batch ${i}–${i + BATCH} returned status ${res.status}`);
@@ -681,7 +683,8 @@ async function processBatch(items, prepFee = 0.5, customBlacklist = []) {
     //  PHASE 2 — Keepa BATCH: all ASINs in 1 call
     //            → rating, drops, avg30, FBA fees
     // ════════════════════════════════════════════
-    const asins = [...new Set(foundItems.map(i => asinMap[i._cleanUpc].asin))];
+    // asinMap: { upc → [asinData, ...] }  (array — supports multiple listings per UPC)
+    const asins = [...new Set(foundItems.flatMap(i => asinMap[i._cleanUpc].map(d => d.asin)))];
     console.log(`[Phase 2] Keepa batch for ${asins.length} ASINs...`);
     const keepaMap = CONFIG.keepaApiKey ? await getKeepaDataBatch(asins) : {};
     console.log(`[Phase 2] ✅ Keepa done: ${Object.keys(keepaMap).length} products in ${((Date.now() - t0) / 1000).toFixed(1)}s`);
@@ -726,95 +729,97 @@ async function processBatch(items, prepFee = 0.5, customBlacklist = []) {
 
     // ════════════════════════════════════════════
     //  PHASE 4 — Compute ROI (pure JS, no API)
+    //  One foundItem can expand to MULTIPLE rows if UPC has multiple Amazon ASINs
     // ════════════════════════════════════════════
     for (const item of foundItems) {
         const upc = item._cleanUpc;
         const cost = Number(item.cost) || 0;
-        const asinData = asinMap[upc];
-        const { asin } = asinData;
-        const keepa = keepaMap[asin] || {};
-        const priceData = priceMap[asin] || { error: 'Price not fetched' };
+        const asinDataList = asinMap[upc]; // array: [{asin, title, ...}, ...]
 
-        // ── Pack/Set Multiplier ──
-        // If Amazon sells a "Set of 3" / "3-Pack" / "3 Per Case", the supplier
-        // cost is for ONE unit but we need to SEND 3 units per Amazon order.
-        // Multiply cost accordingly so ROI reflects real profitability.
-        const packMultiplier = detectPackMultiplier(asinData.title);
-        const effectiveCost = cost * packMultiplier; // what we actually spend per Amazon order
+        for (const asinData of asinDataList) {
+            const { asin } = asinData;
+            const keepa = keepaMap[asin] || {};
+            const priceData = priceMap[asin] || { error: 'Price not fetched' };
 
-        const rowData = {
-            UPC: upc, ItemNumber: item.itemNumber || '',
-            Cost: cost,               // original supplier cost per unit (for display)
-            EffectiveCost: Number(effectiveCost.toFixed(2)),  // cost × pack multiplier (used for ROI)
-            VarCount: packMultiplier, // 1 = single, 3 = set of 3, etc.
-            ASIN: asin, ParentASIN: asinData.parentAsin || null,
-            Title: asinData.title, Brand: asinData.brand || 'N/A',
-            Category: asinData.category, BSR: asinData.main_bsr || 'N',
-            BSRDrop: asinData.bsrDrop,
-            KeepaRating: keepa.rating ?? 'N/A',
-            KeepaReviews: keepa.reviews ?? 'N/A',
-            KeepaDrops: keepa.drops30 ?? 'N/A',
-            KeepaAvg30: keepa.avg30 ?? 'N/A',
-        };
-        if (packMultiplier > 1) console.log(`[Pack] ${asin}: "${asinData.title?.substring(0, 60)}" → ×${packMultiplier}, effectiveCost=$${effectiveCost.toFixed(2)}`);
+            // Pack/Set Multiplier
+            const packMultiplier = detectPackMultiplier(asinData.title);
+            const effectiveCost = cost * packMultiplier;
 
-        // Brand risk
-        rowData.BrandRisk = 'Clear';
-        if (blacklist.length > 0 && asinData.brand) {
-            const lb = asinData.brand.toLowerCase();
-            if (blacklist.some(b => lb.includes(b) || b === lb)) rowData.BrandRisk = 'Restricted';
-        }
-
-        // ── Price ──
-        if (priceData.error) {
-            if (priceData.error === 'Currently unavailable (OOS)') {
-                Object.assign(rowData, {
-                    BuyBoxPrice: 0, Strategy: 'Currently unavailable',
-                    CalcPrice: 0, OffersCount: 0, NetProfit: 0, ROI: 0
-                });
-                profitable.push(rowData);
-            } else {
-                rowData.Problem = priceData.error;
-                problematic.push(rowData);
+            const rowData = {
+                UPC: upc, ItemNumber: item.itemNumber || '',
+                Cost: cost,
+                EffectiveCost: Number(effectiveCost.toFixed(2)),
+                VarCount: packMultiplier,
+                ASIN: asin, ParentASIN: asinData.parentAsin || null,
+                Title: asinData.title, Brand: asinData.brand || 'N/A',
+                Category: asinData.category, BSR: asinData.main_bsr || 'N',
+                BSRDrop: asinData.bsrDrop,
+                KeepaRating: keepa.rating ?? 'N/A',
+                KeepaReviews: keepa.reviews ?? 'N/A',
+                KeepaDrops: keepa.drops30 ?? 'N/A',
+                KeepaAvg30: keepa.avg30 ?? 'N/A',
+            };
+            if (packMultiplier > 1) {
+                console.log('[Pack] ' + asin + ': "' + (asinData.title || '').substring(0, 60) + '" x' + packMultiplier + ', effectiveCost=$' + effectiveCost.toFixed(2));
             }
-            continue;
-        }
 
-        rowData.BuyBoxPrice = priceData.bb_price;
-        rowData.Strategy = priceData.strategy;
-        rowData.CalcPrice = priceData.price;
-        rowData.OffersCount = priceData.offersCount || 0;
+            // Brand risk
+            rowData.BrandRisk = 'Clear';
+            if (blacklist.length > 0 && asinData.brand) {
+                const lb = asinData.brand.toLowerCase();
+                if (blacklist.some(b => lb.includes(b) || b === lb)) rowData.BrandRisk = 'Restricted';
+            }
 
-        // ── FBA Fees: Keepa first, SP API fallback ──
-        let totalFee;
-        if (keepa.pickAndPackFee !== null && keepa.pickAndPackFee !== undefined &&
-            keepa.referralFeeDecimal !== null && keepa.referralFeeDecimal !== undefined) {
-            const referralFee = keepa.referralFeeDecimal * priceData.price;
-            totalFee = keepa.pickAndPackFee + referralFee;
-            rowData.FeesSource = 'Keepa';
-            console.log(`[Fees/Keepa] ${asin}: pick&pack=$${keepa.pickAndPackFee.toFixed(2)}, referral=${(keepa.referralFeeDecimal * 100).toFixed(2)}%=$${referralFee.toFixed(2)}, total=$${totalFee.toFixed(2)}`);
-        } else {
-            // Fallback: individual SP API fee call
-            const feeData = await getFees(asin, priceData.price, token);
-            if (feeData.error) { rowData.Problem = feeData.error; problematic.push(rowData); continue; }
-            totalFee = feeData.fee;
-            rowData.FeesSource = 'SP API';
-        }
+            // Price
+            if (priceData.error) {
+                if (priceData.error === 'Currently unavailable (OOS)') {
+                    Object.assign(rowData, {
+                        BuyBoxPrice: 0, Strategy: 'Currently unavailable',
+                        CalcPrice: 0, OffersCount: 0, NetProfit: 0, ROI: 0
+                    });
+                    profitable.push(rowData);
+                } else {
+                    rowData.Problem = priceData.error;
+                    problematic.push(rowData);
+                }
+                continue;
+            }
 
-        rowData.AmazonFees = Number(totalFee.toFixed(2));
+            rowData.BuyBoxPrice = priceData.bb_price;
+            rowData.Strategy = priceData.strategy;
+            rowData.CalcPrice = priceData.price;
+            rowData.OffersCount = priceData.offersCount || 0;
 
-        // ── ROI — uses EFFECTIVE COST (unit cost × pack multiplier) ──
-        const payout = priceData.price - totalFee;
-        const netProfit = payout - effectiveCost - prepFee;
-        const roi = effectiveCost > 0 ? (netProfit / effectiveCost) * 100 : 0;
+            // FBA Fees: Keepa first, SP API fallback
+            let totalFee;
+            if (keepa.pickAndPackFee != null && keepa.referralFeeDecimal != null) {
+                const referralFee = keepa.referralFeeDecimal * priceData.price;
+                totalFee = keepa.pickAndPackFee + referralFee;
+                rowData.FeesSource = 'Keepa';
+                console.log('[Fees/Keepa] ' + asin + ': pick&pack=$' + keepa.pickAndPackFee.toFixed(2) + ', referral=' + (keepa.referralFeeDecimal * 100).toFixed(2) + '%=$' + referralFee.toFixed(2) + ', total=$' + totalFee.toFixed(2));
+            } else {
+                const feeData = await getFees(asin, priceData.price, token);
+                if (feeData.error) { rowData.Problem = feeData.error; problematic.push(rowData); continue; }
+                totalFee = feeData.fee;
+                rowData.FeesSource = 'SP API';
+            }
 
-        rowData.PrepFee = prepFee;
-        rowData.NetProfit = Number(netProfit.toFixed(2));
-        rowData.ROI = Number(roi.toFixed(2));
+            rowData.AmazonFees = Number(totalFee.toFixed(2));
 
-        if (netProfit > 0) profitable.push(rowData);
-        else { rowData.Problem = 'Negative or Zero Net Profit'; problematic.push(rowData); }
-    }
+            // ROI — uses effectiveCost (cost x pack multiplier)
+            const payout = priceData.price - totalFee;
+            const netProfit = payout - effectiveCost - prepFee;
+            const roi = effectiveCost > 0 ? (netProfit / effectiveCost) * 100 : 0;
+
+            rowData.PrepFee = prepFee;
+            rowData.NetProfit = Number(netProfit.toFixed(2));
+            rowData.ROI = Number(roi.toFixed(2));
+
+            if (netProfit > 0) profitable.push(rowData);
+            else { rowData.Problem = 'Negative or Zero Net Profit'; problematic.push(rowData); }
+        } // end for asinData
+    } // end for item
+
 
     const elapsed = ((Date.now() - t0) / 1000).toFixed(1);
     console.log(`[PriceProcessor] ✅ DONE in ${elapsed}s — profitable: ${profitable.length}, problematic: ${problematic.length}`);
