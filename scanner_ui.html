@@ -1208,53 +1208,54 @@
 
             try {
                 const prepFeeVal = parseFloat(document.getElementById('prepFeeInput').value) || 0;
-
                 let blacklist = []; // Backend will fetch Google sheets automatically
-
                 resultsBlock.classList.remove('hidden');
 
-                const BATCH_SIZE = 30;
+                const BATCH_SIZE = 50;       // Larger batch → fewer Firebase calls
+                const PARALLEL = 3;         // Send 3 batches at once → 3x speedup
                 let totalProcessed = 0;
 
+                // Split all items into batches
+                const batches = [];
                 for (let i = 0; i < pendingItems.length; i += BATCH_SIZE) {
+                    batches.push(pendingItems.slice(i, i + BATCH_SIZE));
+                }
+
+                const totalBatches = batches.length;
+
+                // Process batches in parallel groups
+                for (let g = 0; g < totalBatches; g += PARALLEL) {
                     if (isProcessingCanceled) {
                         statusText.innerText = `Processing stopped by user. Total processed: ${totalProcessed} items.`;
                         break;
                     }
 
-                    const batch = pendingItems.slice(i, i + BATCH_SIZE);
-                    const batchNum = Math.floor(i / BATCH_SIZE) + 1;
-                    const totalBatches = Math.ceil(pendingItems.length / BATCH_SIZE);
+                    const group = batches.slice(g, g + PARALLEL);
+                    statusText.innerText = `Sending batches ${g + 1}–${Math.min(g + PARALLEL, totalBatches)} of ${totalBatches}... (${totalProcessed} items done so far)`;
 
-                    statusText.innerText = `Sending batch ${batchNum} of ${totalBatches} (${batch.length} items) to Firebase... Please wait.`;
+                    // Send all batches in this group simultaneously
+                    const responses = await Promise.all(group.map((batch, idx) =>
+                        fetch(FIREBASE_API_URL, {
+                            method: 'POST',
+                            headers: { 'Content-Type': 'application/json' },
+                            body: JSON.stringify({ items: batch, prepFee: prepFeeVal, blacklist })
+                        }).then(res => {
+                            if (!res.ok) throw new Error(`Firebase Error on batch ${g + idx + 1}: ${res.statusText}`);
+                            return res.json();
+                        })
+                    ));
 
-                    const response = await fetch(FIREBASE_API_URL, {
-                        method: 'POST',
-                        headers: { 'Content-Type': 'application/json' },
-                        body: JSON.stringify({ items: batch, prepFee: prepFeeVal, blacklist })
-                    });
-
-                    if (!response.ok) {
-                        throw new Error(`Firebase Error on batch ${batchNum}: ${response.statusText}`);
+                    // Render results as they come in
+                    for (const data of responses) {
+                        totalProcessed += data.stats.total;
+                        renderResults(data.results.profitable, data.results.problematic);
                     }
-
-                    const data = await response.json();
-                    totalProcessed += data.stats.total;
-
-                    // Render results incrementally
-                    renderResults(data.results.profitable, data.results.problematic);
 
                     if (isProcessingCanceled) break;
 
-                    // Add a tiny pause between requests to let the UI refresh and Firebase cool down
-                    if (batchNum < totalBatches) {
-                        statusText.innerText = `Batch ${batchNum} completed. Pausing 3 seconds...`;
-                        let pauseCounter = 0;
-                        while (pauseCounter < 30) {
-                            if (isProcessingCanceled) break;
-                            await new Promise(r => setTimeout(r, 100));
-                            pauseCounter++;
-                        }
+                    // Short pause to keep UI responsive — uses a single setTimeout (not throttled like loops)
+                    if (g + PARALLEL < totalBatches) {
+                        await new Promise(r => setTimeout(r, 500));
                     }
                 }
 
@@ -1270,6 +1271,7 @@
                 processBtn.disabled = false;
             }
         });
+
 
         function renderResults(profitable, problematic) {
             profitable.forEach(item => {
