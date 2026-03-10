@@ -860,51 +860,110 @@
                 }
 
                 // --- SMART COLUMN DETECTION (CSV/Excel) ---
-                let headerRowIndex = -1;
-                let colMapping = { upc: -1, cost: -1, itemNumber: -1 };
+                // Supports multi-section files (multiple header rows) and
+                // case-price formats ($/Case ÷ Case Size = unit cost)
                 const upcKeywords = ['upc', 'barcode', 'ean', 'gtin', 'each upc'];
-                const costKeywords = ['cost', 'price', 'ea price', 'unit price'];
-                const itemNumKeywords = ['item number', 'item', 'sku', 'part number', 'model'];
+                // '$ / Each' / '$/each' / 'each' = per-unit price used by many suppliers
+                const costKeywords = ['cost', 'unit price', 'ea price', 'each price', 'item price',
+                    '$/ea', '$/unit', 'price ea', '$ / each', '/ each', '/each'];
+                const casePriceKw = ['/ case', '/case', 'case price', '$ / case'];
+                const caseSizeKw = ['case size', 'case qty', 'qty/case', 'qtycase', 'pack size', 'pack qty'];
+                const itemNumKeywords = ['item number', 'item#', 'item no', 'sku', 'part number', 'model'];
 
-                for (let i = 0; i < Math.min(rows.length, 50); i++) {
-                    let row = rows[i];
-                    if (!row || !Array.isArray(row)) continue;
-                    let foundUpcStr = -1, foundCostStr = -1, foundItemNumStr = -1;
-                    for (let c = 0; c < row.length; c++) {
-                        const cellVal = String(row[c] || '').toLowerCase().trim();
-                        if (!cellVal) continue;
-                        if (foundUpcStr === -1 && upcKeywords.some(k => cellVal.includes(k))) foundUpcStr = c;
-                        else if (foundCostStr === -1 && costKeywords.some(k => cellVal.includes(k))) foundCostStr = c;
-                        else if (foundItemNumStr === -1 && itemNumKeywords.some(k => cellVal.includes(k))) foundItemNumStr = c;
+                // Helper: parse a cell value to a float (handles $, commas, etc.)
+                function parseCost(raw) {
+                    if (raw === null || raw === undefined) return NaN;
+                    if (typeof raw === 'number') return raw;
+                    let s = String(raw).replace(/[^0-9.,-]/g, '');
+                    if (!s) return NaN;
+                    if (s.includes(',') && !s.includes('.')) s = s.replace(/,/g, '.');
+                    else if (s.includes(',') && s.includes('.')) {
+                        s = s.lastIndexOf(',') > s.lastIndexOf('.')
+                            ? s.replace(/\./g, '').replace(',', '.')
+                            : s.replace(/,/g, '');
                     }
-                    if (foundUpcStr !== -1 && foundCostStr !== -1) {
-                        headerRowIndex = i; colMapping.upc = foundUpcStr;
-                        colMapping.cost = foundCostStr; colMapping.itemNumber = foundItemNumStr;
-                        break;
-                    }
+                    return parseFloat(s);
                 }
 
-                if (headerRowIndex === -1) throw new Error("Could not detect 'UPC' and 'Cost' columns automatically. Make sure the file has clear headers.");
-
-                pendingItems = [];
-                for (let i = headerRowIndex + 1; i < rows.length; i++) {
+                // Find ALL header rows (files can have multiple sections)
+                const headerRows = [];
+                for (let i = 0; i < rows.length; i++) {
                     const row = rows[i];
                     if (!row || !Array.isArray(row)) continue;
-                    const rawUpc = String(row[colMapping.upc] || '').trim();
-                    const rawCost = String(row[colMapping.cost] || '').trim();
-                    const rawItemNum = colMapping.itemNumber !== -1 ? String(row[colMapping.itemNumber] || '').trim() : '';
-                    if (!rawUpc && !rawCost) continue;
-                    let cleanStr = rawCost.replace(/[^0-9.,-]/g, '');
-                    if (cleanStr.includes(',') && !cleanStr.includes('.')) cleanStr = cleanStr.replace(/,/g, '.');
-                    else if (cleanStr.includes(',') && cleanStr.includes('.')) {
-                        cleanStr = cleanStr.lastIndexOf(',') > cleanStr.lastIndexOf('.')
-                            ? cleanStr.replace(/\./g, '').replace(',', '.') : cleanStr.replace(/,/g, '');
+                    let upcCol = -1, costCol = -1, casePriceCol = -1, caseSizeCol = -1, itemNumCol = -1;
+                    for (let c = 0; c < row.length; c++) {
+                        const cv = String(row[c] || '').toLowerCase().trim();
+                        if (!cv) continue;
+                        if (upcCol === -1 && upcKeywords.some(k => cv.includes(k))) upcCol = c;
+                        if (costCol === -1 && costKeywords.some(k => cv.includes(k))) costCol = c;
+                        if (casePriceCol === -1 && casePriceKw.some(k => cv.includes(k))) casePriceCol = c;
+                        if (caseSizeCol === -1 && caseSizeKw.some(k => cv.includes(k))) caseSizeCol = c;
+                        if (itemNumCol === -1 && itemNumKeywords.some(k => cv.includes(k))) itemNumCol = c;
                     }
-                    pendingItems.push({ itemNumber: rawItemNum, upc: rawUpc, cost: parseFloat(cleanStr) || 0 });
+                    if (upcCol !== -1 && (costCol !== -1 || casePriceCol !== -1)) {
+                        headerRows.push({ rowIdx: i, upcCol, costCol, casePriceCol, caseSizeCol, itemNumCol });
+                    }
                 }
 
-                statusText.innerText = `Found ${pendingItems.length} items to process. Ready to send!`;
+                if (headerRows.length === 0) throw new Error("Could not detect 'UPC' and 'Cost' columns automatically. Make sure the file has clear headers.");
+
+                pendingItems = [];
+                // Process each section
+                for (let h = 0; h < headerRows.length; h++) {
+                    const hdr = headerRows[h];
+                    const nextHdrRow = headerRows[h + 1] ? headerRows[h + 1].rowIdx : rows.length;
+
+                    for (let i = hdr.rowIdx + 1; i < nextHdrRow; i++) {
+                        const row = rows[i];
+                        if (!row || !Array.isArray(row)) continue;
+
+                        const rawUpc = String(row[hdr.upcCol] ?? '').trim();
+                        if (!rawUpc || !/^\d{8,14}$/.test(rawUpc.replace(/\D/g, ''))) continue; // Skip non-UPC rows (e.g. section headers)
+
+                        const cleanUpc = rawUpc.replace(/\D/g, '');
+
+                        // Resolve per-unit cost
+                        let cost = NaN;
+                        if (hdr.costCol !== -1) {
+                            cost = parseCost(row[hdr.costCol]);
+                        }
+                        // Fallback: case price ÷ case size
+                        if (!(cost > 0) && hdr.casePriceCol !== -1) {
+                            const casePrice = parseCost(row[hdr.casePriceCol]);
+                            const caseSize = hdr.caseSizeCol !== -1 ? parseCost(row[hdr.caseSizeCol]) : NaN;
+                            if (casePrice > 0 && caseSize > 0) cost = casePrice / caseSize;
+                            else if (casePrice > 0) cost = casePrice; // fallback: use case price as-is
+                        }
+
+                        if (!(cost > 0)) continue; // Skip rows with missing/negative/zero cost
+
+                        const itemNum = hdr.itemNumCol !== -1 ? String(row[hdr.itemNumCol] ?? '').trim() : '';
+                        pendingItems.push({ itemNumber: itemNum, upc: cleanUpc, cost: Math.round(cost * 100) / 100 });
+                    }
+                }
+
+                // Print what we detected
+                headerRows.forEach((hdr, i) => {
+                    const hRow = rows[hdr.rowIdx];
+                    const upcHdr = hRow[hdr.upcCol] ?? 'N/A';
+                    const costHdr = hdr.costCol !== -1 ? (hRow[hdr.costCol] ?? 'N/A') : '—';
+                    const cpHdr = hdr.casePriceCol !== -1 ? (hRow[hdr.casePriceCol] ?? 'N/A') : '—';
+                    const csHdr = hdr.caseSizeCol !== -1 ? (hRow[hdr.caseSizeCol] ?? 'N/A') : '—';
+                    console.log(`[Parser] Section ${i + 1} @ row ${hdr.rowIdx}: UPC="${upcHdr}" Cost="${costHdr}" CasePrice="${cpHdr}" CaseSize="${csHdr}"`);
+                });
+                if (pendingItems.length > 0) {
+                    const s = pendingItems[0];
+                    console.log(`[Parser] First item: UPC=${s.upc}, Cost=$${s.cost}, Item#=${s.itemNumber}`);
+                }
+
+                const colInfo = headerRows.map((h, i) => {
+                    const r = rows[h.rowIdx];
+                    const cStr = h.costCol !== -1 ? `"${r[h.costCol]}"` : h.casePriceCol !== -1 ? `"${r[h.casePriceCol]}"÷"${r[h.caseSizeCol]}"` : '❌NOT FOUND';
+                    return `Section ${i + 1}: UPC=${r[h.upcCol]}, Cost=${cStr}`;
+                }).join(' | ');
+                statusText.innerText = `✅ Found ${pendingItems.length} items | ${colInfo}`;
                 processBtn.disabled = false;
+
 
             } catch (err) {
                 statusText.innerText = `Parsing Error: ${err.message}`;
@@ -1208,53 +1267,54 @@
 
             try {
                 const prepFeeVal = parseFloat(document.getElementById('prepFeeInput').value) || 0;
-
                 let blacklist = []; // Backend will fetch Google sheets automatically
-
                 resultsBlock.classList.remove('hidden');
 
-                const BATCH_SIZE = 30;
+                const BATCH_SIZE = 50;       // Larger batch → fewer Firebase calls
+                const PARALLEL = 3;         // Send 3 batches at once → 3x speedup
                 let totalProcessed = 0;
 
+                // Split all items into batches
+                const batches = [];
                 for (let i = 0; i < pendingItems.length; i += BATCH_SIZE) {
+                    batches.push(pendingItems.slice(i, i + BATCH_SIZE));
+                }
+
+                const totalBatches = batches.length;
+
+                // Process batches in parallel groups
+                for (let g = 0; g < totalBatches; g += PARALLEL) {
                     if (isProcessingCanceled) {
                         statusText.innerText = `Processing stopped by user. Total processed: ${totalProcessed} items.`;
                         break;
                     }
 
-                    const batch = pendingItems.slice(i, i + BATCH_SIZE);
-                    const batchNum = Math.floor(i / BATCH_SIZE) + 1;
-                    const totalBatches = Math.ceil(pendingItems.length / BATCH_SIZE);
+                    const group = batches.slice(g, g + PARALLEL);
+                    statusText.innerText = `Sending batches ${g + 1}–${Math.min(g + PARALLEL, totalBatches)} of ${totalBatches}... (${totalProcessed} items done so far)`;
 
-                    statusText.innerText = `Sending batch ${batchNum} of ${totalBatches} (${batch.length} items) to Firebase... Please wait.`;
+                    // Send all batches in this group simultaneously
+                    const responses = await Promise.all(group.map((batch, idx) =>
+                        fetch(FIREBASE_API_URL, {
+                            method: 'POST',
+                            headers: { 'Content-Type': 'application/json' },
+                            body: JSON.stringify({ items: batch, prepFee: prepFeeVal, blacklist })
+                        }).then(res => {
+                            if (!res.ok) throw new Error(`Firebase Error on batch ${g + idx + 1}: ${res.statusText}`);
+                            return res.json();
+                        })
+                    ));
 
-                    const response = await fetch(FIREBASE_API_URL, {
-                        method: 'POST',
-                        headers: { 'Content-Type': 'application/json' },
-                        body: JSON.stringify({ items: batch, prepFee: prepFeeVal, blacklist })
-                    });
-
-                    if (!response.ok) {
-                        throw new Error(`Firebase Error on batch ${batchNum}: ${response.statusText}`);
+                    // Render results as they come in
+                    for (const data of responses) {
+                        totalProcessed += data.stats.total;
+                        renderResults(data.results.profitable, data.results.problematic);
                     }
-
-                    const data = await response.json();
-                    totalProcessed += data.stats.total;
-
-                    // Render results incrementally
-                    renderResults(data.results.profitable, data.results.problematic);
 
                     if (isProcessingCanceled) break;
 
-                    // Add a tiny pause between requests to let the UI refresh and Firebase cool down
-                    if (batchNum < totalBatches) {
-                        statusText.innerText = `Batch ${batchNum} completed. Pausing 3 seconds...`;
-                        let pauseCounter = 0;
-                        while (pauseCounter < 30) {
-                            if (isProcessingCanceled) break;
-                            await new Promise(r => setTimeout(r, 100));
-                            pauseCounter++;
-                        }
+                    // Short pause to keep UI responsive — uses a single setTimeout (not throttled like loops)
+                    if (g + PARALLEL < totalBatches) {
+                        await new Promise(r => setTimeout(r, 500));
                     }
                 }
 
@@ -1270,6 +1330,7 @@
                 processBtn.disabled = false;
             }
         });
+
 
         function renderResults(profitable, problematic) {
             profitable.forEach(item => {
