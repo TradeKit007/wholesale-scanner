@@ -942,7 +942,26 @@
                     }
                 }
 
-                statusText.innerText = `Found ${pendingItems.length} items to process. Ready to send!`;
+                // Print what we detected
+                headerRows.forEach((hdr, i) => {
+                    const hRow = rows[hdr.rowIdx];
+                    const upcHdr = hRow[hdr.upcCol] ?? 'N/A';
+                    const costHdr = hdr.costCol !== -1 ? (hRow[hdr.costCol] ?? 'N/A') : '—';
+                    const cpHdr = hdr.casePriceCol !== -1 ? (hRow[hdr.casePriceCol] ?? 'N/A') : '—';
+                    const csHdr = hdr.caseSizeCol !== -1 ? (hRow[hdr.caseSizeCol] ?? 'N/A') : '—';
+                    console.log(`[Parser] Section ${i + 1} @ row ${hdr.rowIdx}: UPC="${upcHdr}" Cost="${costHdr}" CasePrice="${cpHdr}" CaseSize="${csHdr}"`);
+                });
+                if (pendingItems.length > 0) {
+                    const s = pendingItems[0];
+                    console.log(`[Parser] First item: UPC=${s.upc}, Cost=$${s.cost}, Item#=${s.itemNumber}`);
+                }
+
+                const colInfo = headerRows.map((h, i) => {
+                    const r = rows[h.rowIdx];
+                    const cStr = h.costCol !== -1 ? `"${r[h.costCol]}"` : h.casePriceCol !== -1 ? `"${r[h.casePriceCol]}"÷"${r[h.caseSizeCol]}"` : '❌NOT FOUND';
+                    return `Section ${i + 1}: UPC=${r[h.upcCol]}, Cost=${cStr}`;
+                }).join(' | ');
+                statusText.innerText = `✅ Found ${pendingItems.length} items | ${colInfo}`;
                 processBtn.disabled = false;
 
 
