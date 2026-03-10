@@ -326,11 +326,11 @@
         </div>
     </div>
 
-    <!-- ===== PDF COLUMN MAPPING MODAL ===== -->
+    <!-- ===== COLUMN MAPPING MODAL (PDF & Excel/CSV) ===== -->
     <div id="colMappingOverlay" class="hidden">
         <div id="colMappingBox">
             <div class="flex items-center justify-between">
-                <h2 class="text-lg font-bold text-white">📊 Map Your PDF Columns</h2>
+                <h2 id="mappingModalTitle" class="text-lg font-bold text-white">📊 Map Your Columns</h2>
                 <span id="pdfTypeTag" class="badge"
                     style="background:#1F6FEB1A;color:#58a6ff;border:1px solid #1F6FEB44">text-based</span>
             </div>
@@ -859,111 +859,9 @@
                     throw new Error("Unsupported format. Use CSV, Excel (.xlsx/.xls), or PDF.");
                 }
 
-                // --- SMART COLUMN DETECTION (CSV/Excel) ---
-                // Supports multi-section files (multiple header rows) and
-                // case-price formats ($/Case ÷ Case Size = unit cost)
-                const upcKeywords = ['upc', 'barcode', 'ean', 'gtin', 'each upc'];
-                // '$ / Each' / '$/each' / 'each' = per-unit price used by many suppliers
-                const costKeywords = ['cost', 'unit price', 'ea price', 'each price', 'item price',
-                    '$/ea', '$/unit', 'price ea', '$ / each', '/ each', '/each'];
-                const casePriceKw = ['/ case', '/case', 'case price', '$ / case'];
-                const caseSizeKw = ['case size', 'case qty', 'qty/case', 'qtycase', 'pack size', 'pack qty'];
-                const itemNumKeywords = ['item number', 'item#', 'item no', 'sku', 'part number', 'model'];
-
-                // Helper: parse a cell value to a float (handles $, commas, etc.)
-                function parseCost(raw) {
-                    if (raw === null || raw === undefined) return NaN;
-                    if (typeof raw === 'number') return raw;
-                    let s = String(raw).replace(/[^0-9.,-]/g, '');
-                    if (!s) return NaN;
-                    if (s.includes(',') && !s.includes('.')) s = s.replace(/,/g, '.');
-                    else if (s.includes(',') && s.includes('.')) {
-                        s = s.lastIndexOf(',') > s.lastIndexOf('.')
-                            ? s.replace(/\./g, '').replace(',', '.')
-                            : s.replace(/,/g, '');
-                    }
-                    return parseFloat(s);
-                }
-
-                // Find ALL header rows (files can have multiple sections)
-                const headerRows = [];
-                for (let i = 0; i < rows.length; i++) {
-                    const row = rows[i];
-                    if (!row || !Array.isArray(row)) continue;
-                    let upcCol = -1, costCol = -1, casePriceCol = -1, caseSizeCol = -1, itemNumCol = -1;
-                    for (let c = 0; c < row.length; c++) {
-                        const cv = String(row[c] || '').toLowerCase().trim();
-                        if (!cv) continue;
-                        if (upcCol === -1 && upcKeywords.some(k => cv.includes(k))) upcCol = c;
-                        if (costCol === -1 && costKeywords.some(k => cv.includes(k))) costCol = c;
-                        if (casePriceCol === -1 && casePriceKw.some(k => cv.includes(k))) casePriceCol = c;
-                        if (caseSizeCol === -1 && caseSizeKw.some(k => cv.includes(k))) caseSizeCol = c;
-                        if (itemNumCol === -1 && itemNumKeywords.some(k => cv.includes(k))) itemNumCol = c;
-                    }
-                    if (upcCol !== -1 && (costCol !== -1 || casePriceCol !== -1)) {
-                        headerRows.push({ rowIdx: i, upcCol, costCol, casePriceCol, caseSizeCol, itemNumCol });
-                    }
-                }
-
-                if (headerRows.length === 0) throw new Error("Could not detect 'UPC' and 'Cost' columns automatically. Make sure the file has clear headers.");
-
-                pendingItems = [];
-                // Process each section
-                for (let h = 0; h < headerRows.length; h++) {
-                    const hdr = headerRows[h];
-                    const nextHdrRow = headerRows[h + 1] ? headerRows[h + 1].rowIdx : rows.length;
-
-                    for (let i = hdr.rowIdx + 1; i < nextHdrRow; i++) {
-                        const row = rows[i];
-                        if (!row || !Array.isArray(row)) continue;
-
-                        const rawUpc = String(row[hdr.upcCol] ?? '').trim();
-                        if (!rawUpc || !/^\d{8,14}$/.test(rawUpc.replace(/\D/g, ''))) continue; // Skip non-UPC rows (e.g. section headers)
-
-                        const cleanUpc = rawUpc.replace(/\D/g, '');
-
-                        // Resolve per-unit cost
-                        let cost = NaN;
-                        if (hdr.costCol !== -1) {
-                            cost = parseCost(row[hdr.costCol]);
-                        }
-                        // Fallback: case price ÷ case size
-                        if (!(cost > 0) && hdr.casePriceCol !== -1) {
-                            const casePrice = parseCost(row[hdr.casePriceCol]);
-                            const caseSize = hdr.caseSizeCol !== -1 ? parseCost(row[hdr.caseSizeCol]) : NaN;
-                            if (casePrice > 0 && caseSize > 0) cost = casePrice / caseSize;
-                            else if (casePrice > 0) cost = casePrice; // fallback: use case price as-is
-                        }
-
-                        if (!(cost > 0)) continue; // Skip rows with missing/negative/zero cost
-
-                        const itemNum = hdr.itemNumCol !== -1 ? String(row[hdr.itemNumCol] ?? '').trim() : '';
-                        pendingItems.push({ itemNumber: itemNum, upc: cleanUpc, cost: Math.round(cost * 100) / 100 });
-                    }
-                }
-
-                // Print what we detected
-                headerRows.forEach((hdr, i) => {
-                    const hRow = rows[hdr.rowIdx];
-                    const upcHdr = hRow[hdr.upcCol] ?? 'N/A';
-                    const costHdr = hdr.costCol !== -1 ? (hRow[hdr.costCol] ?? 'N/A') : '—';
-                    const cpHdr = hdr.casePriceCol !== -1 ? (hRow[hdr.casePriceCol] ?? 'N/A') : '—';
-                    const csHdr = hdr.caseSizeCol !== -1 ? (hRow[hdr.caseSizeCol] ?? 'N/A') : '—';
-                    console.log(`[Parser] Section ${i + 1} @ row ${hdr.rowIdx}: UPC="${upcHdr}" Cost="${costHdr}" CasePrice="${cpHdr}" CaseSize="${csHdr}"`);
-                });
-                if (pendingItems.length > 0) {
-                    const s = pendingItems[0];
-                    console.log(`[Parser] First item: UPC=${s.upc}, Cost=$${s.cost}, Item#=${s.itemNumber}`);
-                }
-
-                const colInfo = headerRows.map((h, i) => {
-                    const r = rows[h.rowIdx];
-                    const cStr = h.costCol !== -1 ? `"${r[h.costCol]}"` : h.casePriceCol !== -1 ? `"${r[h.casePriceCol]}"÷"${r[h.caseSizeCol]}"` : '❌NOT FOUND';
-                    return `Section ${i + 1}: UPC=${r[h.upcCol]}, Cost=${cStr}`;
-                }).join(' | ');
-                statusText.innerText = `✅ Found ${pendingItems.length} items | ${colInfo}`;
-                processBtn.disabled = false;
-
+                // --- After parsing rows[], open column mapping modal for user review ---
+                // This lets the user verify/correct columns before processing starts.
+                openExcelMappingModal(rows);
 
             } catch (err) {
                 statusText.innerText = `Parsing Error: ${err.message}`;
@@ -971,9 +869,169 @@
         });
 
         // =====================================================
-        // PDF HANDLING — Text-based + OCR + Column Mapping
+        // EXCEL / CSV COLUMN MAPPING MODAL
         // =====================================================
-        let _pdfRows = [];
+        let _excelRows = [];
+        let _currentMappingMode = 'pdf'; // 'pdf' or 'excel'
+
+        // Helper: parse a cell value to a float (handles $, commas, etc.)
+        function parseCost(raw) {
+            if (raw === null || raw === undefined) return NaN;
+            if (typeof raw === 'number') return raw;
+            let s = String(raw).replace(/[^0-9.,-]/g, '');
+            if (!s) return NaN;
+            if (s.includes(',') && !s.includes('.')) s = s.replace(/,/g, '.');
+            else if (s.includes(',') && s.includes('.')) {
+                s = s.lastIndexOf(',') > s.lastIndexOf('.')
+                    ? s.replace(/\./g, '').replace(',', '.')
+                    : s.replace(/,/g, '');
+            }
+            return parseFloat(s);
+        }
+
+        function openExcelMappingModal(rows) {
+            _excelRows = rows;
+            _currentMappingMode = 'excel';
+
+            if (!rows || rows.length === 0) {
+                statusText.innerText = '❌ File is empty or could not be read.';
+                return;
+            }
+
+            // Find max columns width
+            const maxCols = Math.max(...rows.slice(0, 30).map(r => (r || []).length));
+            if (maxCols < 2) {
+                statusText.innerText = '❌ File has only 1 column — check file format.';
+                return;
+            }
+
+            // Auto-detect likely column roles to pre-select
+            const upcKws = ['upc', 'barcode', 'ean', 'gtin', 'each upc'];
+            const costKws = ['cost', 'unit price', 'ea price', 'each price', 'item price', '$/ea', '$/unit', 'price ea', '$ / each', '/ each', '/each'];
+            const cpKws = ['/ case', '/case', 'case price', '$ / case'];
+            const csKws = ['case size', 'case qty', 'qty/case', 'pack size', 'pack qty'];
+            const itemKws = ['item number', 'item#', 'item no', 'sku', 'part number', 'model'];
+
+            const colGuess = new Array(maxCols).fill('ignore');
+            // Scan first 15 rows to find header-like row
+            for (let ri = 0; ri < Math.min(15, rows.length); ri++) {
+                const row = rows[ri] || [];
+                let rowHasUpc = false, rowHasCost = false;
+                const tmp = new Array(maxCols).fill('ignore');
+                for (let c = 0; c < maxCols; c++) {
+                    const cv = String(row[c] || '').toLowerCase().trim();
+                    if (!cv) continue;
+                    if (upcKws.some(k => cv.includes(k))) { tmp[c] = 'upc'; rowHasUpc = true; }
+                    else if (costKws.some(k => cv.includes(k))) { tmp[c] = 'cost'; rowHasCost = true; }
+                    else if (cpKws.some(k => cv.includes(k))) { tmp[c] = 'caseprice'; rowHasCost = true; }
+                    else if (csKws.some(k => cv.includes(k))) { tmp[c] = 'casesize'; }
+                    else if (itemKws.some(k => cv.includes(k))) tmp[c] = 'itemnum';
+                }
+                if (rowHasUpc && rowHasCost) { // found the header row
+                    for (let c = 0; c < maxCols; c++) colGuess[c] = tmp[c];
+                    break;
+                }
+            }
+
+            // Update modal title
+            document.getElementById('mappingModalTitle').textContent = '📊 Вибери колонки (Excel/CSV)';
+            document.getElementById('pdfTypeTag').textContent = 'Excel / CSV';
+            document.getElementById('pdfTypeTag').style.cssText = 'background:#3fb95022;color:#3fb950;border:1px solid #3fb95055';
+            document.getElementById('ocrWarning').classList.add('hidden');
+
+            // Build preview — show first 8 non-empty rows
+            const previewHead = document.getElementById('pdfPreviewHead');
+            const previewBody = document.getElementById('pdfPreviewBody');
+            previewHead.innerHTML = '';
+            previewBody.innerHTML = '';
+            const headRow = document.createElement('tr');
+            for (let c = 0; c < maxCols; c++) {
+                const th = document.createElement('th');
+                th.style.cssText = 'padding:6px 10px;background:#0d1117;color:#8b949e;font-size:10px;font-weight:700;text-align:left;border-bottom:1px solid #30363d;white-space:nowrap';
+                th.textContent = 'Col ' + String.fromCharCode(65 + c);
+                headRow.appendChild(th);
+            }
+            previewHead.appendChild(headRow);
+
+            let shown = 0;
+            for (let ri = 0; ri < rows.length && shown < 8; ri++) {
+                const row = rows[ri] || [];
+                if (!row.some(c => String(c || '').trim())) continue;
+                shown++;
+                const tr = document.createElement('tr');
+                for (let c = 0; c < maxCols; c++) {
+                    const td = document.createElement('td');
+                    const val = String(row[c] ?? '');
+                    td.style.cssText = 'padding:5px 10px;font-size:11px;border-bottom:1px solid #21262d;color:' +
+                        (shown === 1 ? '#e6edf3' : '#c9d1d9') + ';background:' + (shown % 2 === 0 ? '#161b22' : '#1c2128') +
+                        ';max-width:180px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap';
+                    td.title = val;
+                    td.textContent = val.substring(0, 40);
+                    tr.appendChild(td);
+                }
+                previewBody.appendChild(tr);
+            }
+
+            // Build role dropdowns per column
+            const colMappers = document.getElementById('colMappers');
+            colMappers.innerHTML = '';
+            const ROLES = [
+                { value: 'ignore', label: '🚫 Ignore' },
+                { value: 'upc', label: '🔢 UPC / Barcode' },
+                { value: 'cost', label: '💰 Cost / Unit Price' },
+                { value: 'caseprice', label: '📦 $ / Case Price' },
+                { value: 'casesize', label: '🔢 Case Size / Qty' },
+                { value: 'itemnum', label: '🏷️ Item# / SKU' },
+            ];
+
+            for (let c = 0; c < maxCols; c++) {
+                // Show only columns that have at least 1 non-empty value in first 15 data rows
+                const hasData = rows.slice(0, 15).some(r => String((r || [])[c] || '').trim());
+                if (!hasData) continue;
+
+                const card = document.createElement('div');
+                card.className = 'col-mapper-card';
+                const label = document.createElement('div');
+                label.style.cssText = 'font-size:11px;font-weight:700;color:#e6edf3;margin-bottom:4px';
+                label.textContent = 'Column ' + String.fromCharCode(65 + c);
+                card.appendChild(label);
+
+                // Sample values
+                const sampleDiv = document.createElement('div');
+                let sampleCount = 0;
+                for (let ri = 0; ri < rows.length && sampleCount < 3; ri++) {
+                    const v = String((rows[ri] || [])[c] ?? '').trim();
+                    if (!v) continue;
+                    sampleCount++;
+                    const s = document.createElement('div');
+                    s.className = 'col-preview-val';
+                    s.textContent = v.substring(0, 25);
+                    s.title = v;
+                    sampleDiv.appendChild(s);
+                }
+                card.appendChild(sampleDiv);
+
+                const select = document.createElement('select');
+                select.dataset.col = c;
+                select.className = 'col-mapper-select';
+                ROLES.forEach(opt => {
+                    const o = document.createElement('option');
+                    o.value = opt.value;
+                    o.textContent = opt.label;
+                    if (opt.value === colGuess[c]) o.selected = true;
+                    select.appendChild(o);
+                });
+                card.appendChild(select);
+                colMappers.appendChild(card);
+            }
+
+            document.getElementById('mappingErrors').classList.add('hidden');
+            document.getElementById('mappingCount').textContent = rows.length + ' rows in file';
+            document.getElementById('colMappingOverlay').classList.add('pdf-modal-open');
+            statusText.innerText = '📊 Перевір та підтверди колонки, потім натисни Confirm.';
+        }
+
+
 
         async function handlePdfFile(file) {
             if (typeof pdfjsLib === 'undefined') {
@@ -1201,46 +1259,81 @@
         document.getElementById('confirmMappingBtn').addEventListener('click', () => {
             const selects = document.querySelectorAll('#colMappers select');
             const mapping = Array.from(selects).map(s => ({ col: parseInt(s.dataset.col), role: s.value }));
-            const rows = _pdfRows;
             const errors = [];
-            if (!mapping.some(m => m.role === 'upc' || m.role === 'itemnum'))
-                errors.push('Потрібна хоча б одна колонка UPC або Item#/SKU');
-            if (!mapping.some(m => m.role === 'cost'))
-                errors.push('Потрібна хоча б одна колонка Cost/Price');
-            const dataRows = rows.slice(1).filter(r => r.some(c => c && c.trim()));
-            if (!dataRows.length) errors.push('Жодного рядка з даними не знайдено');
-            if (dataRows.some(r => r.some(c => c && /[^\x00-\x7F]{3,}/.test(c))))
-                errors.push('Файл може містити пошкоджені символи — перевірте дані');
+
+            const needUpc = !mapping.some(m => m.role === 'upc');
+            const needCost = !mapping.some(m => m.role === 'cost' || m.role === 'caseprice');
+            if (needUpc) errors.push('Потрібна хоча б одна колонка UPC / Barcode');
+            if (needCost) errors.push('Потрібна хоча б одна колонка Cost або $ / Case Price');
 
             const errBox = document.getElementById('mappingErrors');
             if (errors.length) {
                 errBox.classList.remove('hidden');
-                errBox.innerHTML = errors.map(e => `⚠️ ${e}`).join('<br>');
+                errBox.innerHTML = errors.map(e => '⚠️ ' + e).join('<br>');
                 return;
             }
             errBox.classList.add('hidden');
 
             const upcCol = mapping.find(m => m.role === 'upc')?.col ?? -1;
             const costCol = mapping.find(m => m.role === 'cost')?.col ?? -1;
+            const casepriceCol = mapping.find(m => m.role === 'caseprice')?.col ?? -1;
+            const casesizeCol = mapping.find(m => m.role === 'casesize')?.col ?? -1;
             const itemCol = mapping.find(m => m.role === 'itemnum')?.col ?? -1;
 
             pendingItems = [];
-            dataRows.forEach(row => {
-                const rawUpc = upcCol >= 0 ? String(row[upcCol] || '').trim() : '';
-                const rawCost = costCol >= 0 ? String(row[costCol] || '').trim() : '';
-                const rawItem = itemCol >= 0 ? String(row[itemCol] || '').trim() : '';
-                if (!rawUpc && !rawCost) return;
-                let cs = rawCost.replace(/[^0-9.,-]/g, '');
-                if (cs.includes(',') && !cs.includes('.')) cs = cs.replace(/,/g, '.');
-                else if (cs.includes(',') && cs.includes('.'))
-                    cs = cs.lastIndexOf(',') > cs.lastIndexOf('.') ? cs.replace(/\./g, '').replace(',', '.') : cs.replace(/,/g, '');
-                pendingItems.push({ itemNumber: rawItem, upc: rawUpc, cost: parseFloat(cs) || 0 });
-            });
 
-            document.getElementById('colMappingOverlay').classList.remove('pdf-modal-open');
-            statusText.innerText = `Loaded ${pendingItems.length} items from PDF. Ready to process!`;
+            if (_currentMappingMode === 'excel') {
+                // Excel/CSV mode: scan ALL rows, pick those with valid UPC + positive cost
+                const rows = _excelRows;
+                for (const row of rows) {
+                    if (!row || !Array.isArray(row)) continue;
+                    const rawUpc = String(row[upcCol] ?? '').trim();
+                    if (!rawUpc || !/^\d{8,14}$/.test(rawUpc.replace(/\D/g, ''))) continue;
+
+                    let cost = NaN;
+                    if (costCol >= 0) cost = parseCost(row[costCol]);
+                    // Fallback: case price ÷ case size
+                    if (!(cost > 0) && casepriceCol >= 0) {
+                        const cp = parseCost(row[casepriceCol]);
+                        const cs = casesizeCol >= 0 ? parseCost(row[casesizeCol]) : NaN;
+                        if (cp > 0 && cs > 0) cost = cp / cs;
+                        else if (cp > 0) cost = cp;
+                    }
+                    if (!(cost > 0)) continue;
+
+                    const itemNum = itemCol >= 0 ? String(row[itemCol] ?? '').trim() : '';
+                    pendingItems.push({
+                        itemNumber: itemNum,
+                        upc: rawUpc.replace(/\D/g, ''),
+                        cost: Math.round(cost * 100) / 100
+                    });
+                }
+                document.getElementById('colMappingOverlay').classList.remove('pdf-modal-open');
+                statusText.innerText = '✅ Found ' + pendingItems.length + ' items from Excel. Ready to process!';
+
+            } else {
+                // PDF mode — original logic
+                const rows = _pdfRows;
+                const dataRows = rows.slice(1).filter(r => r.some(c => c && c.trim()));
+                if (!dataRows.length) {
+                    errBox.classList.remove('hidden');
+                    errBox.innerHTML = '⚠️ Жодного рядка з даними не знайдено';
+                    return;
+                }
+                dataRows.forEach(row => {
+                    const rawUpc = upcCol >= 0 ? String(row[upcCol] || '').trim() : '';
+                    const rawCost = costCol >= 0 ? String(row[costCol] || '').trim() : '';
+                    const rawItem = itemCol >= 0 ? String(row[itemCol] || '').trim() : '';
+                    if (!rawUpc && !rawCost) return;
+                    pendingItems.push({ itemNumber: rawItem, upc: rawUpc, cost: parseCost(rawCost) || 0 });
+                });
+                document.getElementById('colMappingOverlay').classList.remove('pdf-modal-open');
+                statusText.innerText = 'Loaded ' + pendingItems.length + ' items from PDF. Ready to process!';
+            }
+
             processBtn.disabled = pendingItems.length === 0;
         });
+
 
         // Close modal on Escape or clicking outside
         document.addEventListener('keydown', e => {
