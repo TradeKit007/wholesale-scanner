@@ -453,7 +453,9 @@ async function getKeepaDataBatch(asins) {
                     const startK = (bbarr.length - 1) % 2 === 1 ? (bbarr.length - 1) : (bbarr.length - 2);
                     for (let k = startK; k >= 1; k -= 2) {
                         // Some values might be -1 if out of stock
-                        if (bbarr[k] > 0) { currentBBPrice = bbarr[k] / 100; break; }
+                        if (bbarr[k] > 0 && bbarr[k] < 999900) { // Sanity: < $9999 (>$9999 = likely a Keepa timestamp)
+                            currentBBPrice = bbarr[k] / 100; break;
+                        }
                     }
                 }
 
@@ -462,7 +464,7 @@ async function getKeepaDataBatch(asins) {
                     const amzarr = product.csv[0];
                     const startK = (amzarr.length - 1) % 2 === 1 ? (amzarr.length - 1) : (amzarr.length - 2);
                     for (let k = startK; k >= 1; k -= 2) {
-                        if (amzarr[k] > 0) { amazonPrice = amzarr[k] / 100; break; }
+                        if (amzarr[k] > 0 && amzarr[k] < 999900) { amazonPrice = amzarr[k] / 100; break; }
                     }
                 }
 
