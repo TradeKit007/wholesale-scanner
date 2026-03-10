@@ -79,6 +79,53 @@ async function callSpApi(method, path, body = null, accessToken, retries = 3) {
 
 const sleep = (ms) => new Promise(resolve => setTimeout(resolve, ms));
 
+/**
+ * Detects the pack/set multiplier from an Amazon product title.
+ * e.g. "Set of 3" → 3, "Pack of 6 Boxes" → 6, "3 Per Case" → 3, "Twin Pack" → 2
+ * Returns 1 if no multi-pack detected.
+ */
+function detectPackMultiplier(title) {
+    if (!title) return 1;
+    const t = title;
+    const patterns = [
+        [/(\d+)\s*[-–]\s*[Pp]ack\b/, null],           // "3-Pack", "6-Pack"
+        [/(\d+)\s+[Pp]ack\b/, null],                  // "3 Pack"
+        [/[Pp]ack\s+of\s+(\d+)/, null],               // "Pack of 3" / "Pack of 3 Boxes"
+        [/[Ss]et\s+of\s+(\d+)/, null],                // "Set of 3"
+        [/[Bb]undle\s+of\s+(\d+)/, null],             // "Bundle of 3"
+        [/[Cc]ase\s+of\s+(\d+)/, null],               // "Case of 6"
+        [/[Bb]ox\s+of\s+(\d+)/, null],                // "Box of 4"
+        [/[Bb]ag\s+of\s+(\d+)/, null],                // "Bag of 12"
+        [/[Ll]ot\s+of\s+(\d+)/, null],                // "Lot of 3"
+        [/(\d+)\s+[Pp]er\s+[Cc]ase/, null],           // "3 Per Case" ← key fix
+        [/(\d+)\s+[Pp]er\s+[Pp]ack/, null],           // "3 Per Pack"
+        [/(\d+)\s*[-–]?\s*[Cc]ount\b/, null],         // "3-Count", "3 Count"
+        [/\((\d+)\s*[Cc]ount\)/, null],               // "(3 Count)"
+        [/(\d+)\s*[-–]?\s*[Cc]t\b/, null],            // "3ct", "3-ct"
+        [/(\d+)\s*[-–]?\s*[Pp]iece[s]?\b/, null],    // "3 Pieces", "3-Piece"
+        [/(\d+)\s*[Pp]k\b/i, null],                   // "3pk"
+        [/\((\d+)\s*[Pp]ack\)/, null],                // "(3 Pack)"
+        [/(\d+)\s+[Ii]tems?\b/, null],                // "3 Items"
+        [/[Tt]win\s*[Pp]ack/, 2],                     // "Twin Pack" → 2
+        [/[Tt]riple\s*[Pp]ack/, 3],                   // "Triple Pack" → 3
+        [/[Qq]uad\s*[Pp]ack/, 4],                     // "Quad Pack" → 4
+    ];
+    for (const [rx, fixed] of patterns) {
+        const m = t.match(rx);
+        if (m) {
+            const n = fixed !== null ? fixed : parseInt(m[1]);
+            if (n >= 2 && n <= 200) return n;
+        }
+    }
+    // Pattern: "Noun & Noun Set" — count & before "Set" (e.g. "A & B Set" → 2×)
+    const andSetMatch = t.match(/\w[\w\s,'-]{1,40}\s*(?:&\s*\w[\w\s,'-]{1,30})+\s+Set\b/i);
+    if (andSetMatch) {
+        const count = (andSetMatch[0].match(/&/g) || []).length + 1;
+        if (count >= 2) return count;
+    }
+    return 1;
+}
+
 async function getAsinAndBsr(upc, token) {
     const path = `/catalog/2022-04-01/items?marketplaceIds=${CONFIG.marketplaceId}&identifiers=${upc}&identifiersType=UPC&includedData=salesRanks,summaries,relationships`;
     const res = await callSpApi('GET', path, null, token);
@@ -688,8 +735,18 @@ async function processBatch(items, prepFee = 0.5, customBlacklist = []) {
         const keepa = keepaMap[asin] || {};
         const priceData = priceMap[asin] || { error: 'Price not fetched' };
 
+        // ── Pack/Set Multiplier ──
+        // If Amazon sells a "Set of 3" / "3-Pack" / "3 Per Case", the supplier
+        // cost is for ONE unit but we need to SEND 3 units per Amazon order.
+        // Multiply cost accordingly so ROI reflects real profitability.
+        const packMultiplier = detectPackMultiplier(asinData.title);
+        const effectiveCost = cost * packMultiplier; // what we actually spend per Amazon order
+
         const rowData = {
-            UPC: upc, ItemNumber: item.itemNumber || '', Cost: cost,
+            UPC: upc, ItemNumber: item.itemNumber || '',
+            Cost: cost,               // original supplier cost per unit (for display)
+            EffectiveCost: Number(effectiveCost.toFixed(2)),  // cost × pack multiplier (used for ROI)
+            VarCount: packMultiplier, // 1 = single, 3 = set of 3, etc.
             ASIN: asin, ParentASIN: asinData.parentAsin || null,
             Title: asinData.title, Brand: asinData.brand || 'N/A',
             Category: asinData.category, BSR: asinData.main_bsr || 'N',
@@ -699,6 +756,7 @@ async function processBatch(items, prepFee = 0.5, customBlacklist = []) {
             KeepaDrops: keepa.drops30 ?? 'N/A',
             KeepaAvg30: keepa.avg30 ?? 'N/A',
         };
+        if (packMultiplier > 1) console.log(`[Pack] ${asin}: "${asinData.title?.substring(0, 60)}" → ×${packMultiplier}, effectiveCost=$${effectiveCost.toFixed(2)}`);
 
         // Brand risk
         rowData.BrandRisk = 'Clear';
@@ -745,10 +803,10 @@ async function processBatch(items, prepFee = 0.5, customBlacklist = []) {
 
         rowData.AmazonFees = Number(totalFee.toFixed(2));
 
-        // ── ROI ──
+        // ── ROI — uses EFFECTIVE COST (unit cost × pack multiplier) ──
         const payout = priceData.price - totalFee;
-        const netProfit = payout - cost - prepFee;
-        const roi = cost > 0 ? (netProfit / cost) * 100 : 0;
+        const netProfit = payout - effectiveCost - prepFee;
+        const roi = effectiveCost > 0 ? (netProfit / effectiveCost) * 100 : 0;
 
         rowData.PrepFee = prepFee;
         rowData.NetProfit = Number(netProfit.toFixed(2));

@@ -1415,17 +1415,17 @@
                 // ---- Set Quantity Detection ----
                 function detectSetQty(title) {
                     if (!title) return 1;
-
-                    // Pattern 1: explicit number patterns (most reliable)
                     const numPatterns = [
                         [/(\d+)\s*-\s*[Pp]ack/, null],
                         [/(\d+)\s*[Pp]ack\b/, null],
                         [/[Pp]ack\s+of\s+(\d+)/, null],
                         [/[Ss]et\s+of\s+(\d+)/, null],
-                        [/[Cc]ase\s+of\s+(\d+)/, null],   // ← NEW: (Case of 6)
-                        [/[Bb]ox\s+of\s+(\d+)/, null],   // ← NEW: Box of 4
-                        [/[Bb]ag\s+of\s+(\d+)/, null],   // ← NEW: Bag of 12
-                        [/[Ll]ot\s+of\s+(\d+)/, null],   // ← NEW: Lot of 3
+                        [/[Cc]ase\s+of\s+(\d+)/, null],
+                        [/[Bb]ox\s+of\s+(\d+)/, null],
+                        [/[Bb]ag\s+of\s+(\d+)/, null],
+                        [/[Ll]ot\s+of\s+(\d+)/, null],
+                        [/(\d+)\s+[Pp]er\s+[Cc]ase/, null],  // ← KEY FIX: "3 Per Case"
+                        [/(\d+)\s+[Pp]er\s+[Pp]ack/, null],  // "3 Per Pack"
                         [/(\d+)\s*-?\s*[Cc]ount\b/, null],
                         [/\((\d+)\s*[Cc]ount\)/, null],
                         [/(\d+)\s*-?\s*[Cc]t\.?\b/, null],
@@ -1442,19 +1442,15 @@
                         const m = title.match(rx);
                         if (m) return fixed !== null ? fixed : (parseInt(m[1]) || 1);
                     }
-
-                    // Pattern 2: "Noun & Noun Set" — count ampersands before "Set"
-                    // e.g. "Shampoo & Conditioner Set" → 2×
-                    // e.g. "Shampoo & Conditioner & Serum Set" → 3×
                     const andSetMatch = title.match(/\w[\w\s,'-]{1,40}\s*(?:&\s*\w[\w\s,'-]{1,30})+\s+Set\b/i);
                     if (andSetMatch) {
                         const ampersandCount = (andSetMatch[0].match(/&/g) || []).length;
                         if (ampersandCount >= 1) return ampersandCount + 1;
                     }
-
                     return 1;
                 }
-                const setQty = detectSetQty(item.Title);
+                // Use VarCount from backend if available (more accurate), otherwise detect from title
+                const setQty = item.VarCount && item.VarCount > 1 ? item.VarCount : detectSetQty(item.Title);
                 const setQtyHtml = setQty > 1
                     ? `<span style="background:#1f6feb22;color:#58a6ff;border:1px solid #1f6feb55;padding:2px 8px;border-radius:12px;font-weight:700;font-size:11px">${setQty}×</span>`
                     : `<span style="color:#484f58;font-size:11px">1×</span>`;
@@ -1482,7 +1478,12 @@
                     </td>
                     <td class="px-3 py-3 text-center text-xs" ${td}>${varLabel}</td>
                     <td class="px-3 py-3 text-xs truncate max-w-xs" style="border-bottom:1px solid #21262d;color:#e6edf3" title="${item.Title.replace(/"/g, '&quot;')}">${item.Title}</td>
-                    <td class="px-3 py-3 font-bold" style="border-bottom:1px solid #21262d;color:#e6edf3">$${item.Cost}</td>
+                    <td class="px-3 py-3 font-bold" style="border-bottom:1px solid #21262d;color:#e6edf3">
+                        ${setQty > 1
+                        ? `<span style="color:#e6edf3">$${item.EffectiveCost != null ? item.EffectiveCost : item.Cost}</span><span style="color:#8b949e;font-size:10px;margin-left:4px" title="Unit cost $${item.Cost} × ${setQty}">($${item.Cost}×${setQty})</span>`
+                        : `$${item.Cost}`
+                    }
+                    </td>
                     <td class="px-3 py-3 text-xs" ${td}>
                         <div class="flex items-center gap-1 flex-wrap">
                             <span style="color:#c9d1d9;font-weight:600">${item.BSR}</span> ${bsrDropHtml}
