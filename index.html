@@ -1591,13 +1591,14 @@
                             // Note: BSR cell format includes "\n" and Category name, we must parse only the first line/number.
                             let cellValStr = cellText.split('\n')[0].replace(/[^0-9.-]/g, '');
 
-                            // If the item has a dash (e.g. OOS items with no calculatable ROI), 
-                            // we skip the numerical bounds check so they always remain visible for review
+                            // If the item has a dash (e.g. OOS items with no calculatable ROI),
+                            // or N/A / 'No Key' rating — we skip the check so they always stay visible.
                             if (cellValStr.trim() === '-' || cellText.trim() === '-') {
                                 return; // do not hide this row for this column
                             }
 
-                            let cellVal = parseFloat(cellValStr) || 0;
+                            const cellVal = parseFloat(cellValStr);
+                            if (isNaN(cellVal)) return; // unknown value (N/A, No Key) — don't hide
 
                             if (isLessThan && cellVal >= filterVal) show = false;
                             if (isGreaterThan && cellVal <= filterVal) show = false;
