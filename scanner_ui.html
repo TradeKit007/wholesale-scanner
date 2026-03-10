@@ -863,8 +863,10 @@
                 // Supports multi-section files (multiple header rows) and
                 // case-price formats ($/Case ÷ Case Size = unit cost)
                 const upcKeywords = ['upc', 'barcode', 'ean', 'gtin', 'each upc'];
-                const costKeywords = ['cost', 'unit price', 'ea price', 'each price', 'item price', '$/ea', '$/unit', 'price ea'];
-                const casePriceKw = ['/ case', '/case', 'case price', 'extended', '$ / case'];
+                // '$ / Each' / '$/each' / 'each' = per-unit price used by many suppliers
+                const costKeywords = ['cost', 'unit price', 'ea price', 'each price', 'item price',
+                    '$/ea', '$/unit', 'price ea', '$ / each', '/ each', '/each'];
+                const casePriceKw = ['/ case', '/case', 'case price', '$ / case'];
                 const caseSizeKw = ['case size', 'case qty', 'qty/case', 'qtycase', 'pack size', 'pack qty'];
                 const itemNumKeywords = ['item number', 'item#', 'item no', 'sku', 'part number', 'model'];
 
