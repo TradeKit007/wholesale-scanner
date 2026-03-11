@@ -233,6 +233,20 @@ const AMAZON_SELLER_IDS = [
     'A2R2RITDJNW1Q6'  // Amazon (Other/Subsidiary often seen on Beauty/Grocery)
 ];
 
+function estimateFbaFee(weightG) {
+    // Local AWS approximate FBA standard fee calculation (saves 1.5s SP-API call per item!)
+    if (!weightG) return 4.52; // Fallback to ~1.0 lb fee if unknown
+    const lb = weightG / 453.592;
+    if (lb <= 0.25) return 3.22;
+    if (lb <= 0.5) return 3.40;
+    if (lb <= 1.0) return 3.86;
+    if (lb <= 1.5) return 4.38;
+    if (lb <= 2.0) return 4.52;
+    if (lb <= 2.5) return 4.80;
+    if (lb <= 3.0) return 5.08;
+    return 5.08 + Math.ceil((lb - 3.0) / 0.5) * 0.28;
+}
+
 // Shared pricing payload parser — used by both single and batch pricing endpoints
 function parseSingleOfferPayload(payload) {
     const offers = payload.Offers || [];
@@ -489,10 +503,9 @@ async function getKeepaDataBatch(asins) {
 
     for (let i = 0; i < asins.length; i += KEEPA_CHUNK) {
         const chunk = asins.slice(i, i + KEEPA_CHUNK);
-        // stats=0 → no precomputed stats
-        // offers=20 → includes BB price, FBA fees, and success offers WITHOUT costing 5 tokens like buybox=1 does!
+        // stats=0, offers=0 to avoid extreme token consumption which causes 429s for 7000 items
         const url = `https://api.keepa.com/product?key=${CONFIG.keepaApiKey}&domain=1` +
-            `&asin=${chunk.join(',')}&stats=0&rating=1&offers=20`;
+            `&asin=${chunk.join(',')}&stats=0&rating=1&offers=0`;
         try {
             const res = await axios.get(url, { validateStatus: () => true, timeout: 45000 });
 
@@ -597,6 +610,7 @@ async function getKeepaDataBatch(asins) {
                     reviews: reviews !== null ? reviews : 'N/A',
                     drops30: drops30 !== null ? drops30 : 'N/A',
                     avg30: avg30Price !== null ? avg30Price : 'N/A',
+                    packageWeight: product.packageWeight,
                     pickAndPackFee, referralFeeDecimal,
                     currentBBPrice, amazonPrice, currentOffersCount,
                 };
@@ -637,7 +651,7 @@ async function getAsinBatch(upcs, token) {
                 let matchingUpc = null;
                 for (const idGroup of item.identifiers || []) {
                     for (const id of idGroup.identifiers || []) {
-                        if (id.identifierType === 'UPC' && chunk.includes(id.identifier)) {
+                        if (chunk.includes(id.identifier)) {
                             matchingUpc = id.identifier;
                             break;
                         }
@@ -911,19 +925,12 @@ async function processBatch(items, prepFee = 0.5, customBlacklist = []) {
             rowData.CalcPrice = priceData.price;
             rowData.OffersCount = priceData.offersCount || 0;
 
-            // FBA Fees: Keepa first, SP API fallback
+            // Local FBA Fees calculation eliminates 1-by-1 SP-API delays!
             let totalFee;
-            if (keepa.pickAndPackFee != null && keepa.referralFeeDecimal != null) {
-                const referralFee = keepa.referralFeeDecimal * priceData.price;
-                totalFee = keepa.pickAndPackFee + referralFee;
-                rowData.FeesSource = 'Keepa';
-                console.log('[Fees/Keepa] ' + asin + ': pick&pack=$' + keepa.pickAndPackFee.toFixed(2) + ', referral=' + (keepa.referralFeeDecimal * 100).toFixed(2) + '%=$' + referralFee.toFixed(2) + ', total=$' + totalFee.toFixed(2));
-            } else {
-                const feeData = await getFees(asin, priceData.price, token);
-                if (feeData.error) { rowData.Problem = feeData.error; problematic.push(rowData); continue; }
-                totalFee = feeData.fee;
-                rowData.FeesSource = 'SP API';
-            }
+            const referralFee = priceData.price * 0.15; // standard 15% 
+            const pickPack = keepa.packageWeight ? estimateFbaFee(keepa.packageWeight) : 4.52;
+            totalFee = pickPack + referralFee;
+            rowData.FeesSource = 'Estimated (Local)';
 
             rowData.AmazonFees = Number(totalFee.toFixed(2));
 
