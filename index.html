@@ -889,6 +889,16 @@
             return parseFloat(s);
         }
 
+        // Normalize UPC — Excel drops leading zeros (stores barcodes as numbers).
+        // e.g. "086486024761" (12-digit) → Excel → 86486024761 (11-digit number)
+        // Fix: pad 11→12 and 7→8 with leading zero.
+        function normalizeUpc(raw) {
+            let digits = String(raw || '').replace(/\D/g, '');
+            if (digits.length === 11) digits = '0' + digits; // UPC-A with dropped leading 0
+            if (digits.length === 7) digits = '0' + digits; // UPC-E / EAN-8 with dropped leading 0
+            return digits;
+        }
+
         function openExcelMappingModal(rows) {
             _excelRows = rows;
             _currentMappingMode = 'excel';
@@ -1287,8 +1297,10 @@
                 const rows = _excelRows;
                 for (const row of rows) {
                     if (!row || !Array.isArray(row)) continue;
-                    const rawUpc = String(row[upcCol] ?? '').trim();
-                    if (!rawUpc || !/^\d{8,14}$/.test(rawUpc.replace(/\D/g, ''))) continue;
+                    const rawDigits = String(row[upcCol] ?? '').replace(/\D/g, '');
+                    const normUpc = normalizeUpc(rawDigits); // restore leading zeros Excel drops
+                    // accept 7-14 digits pre-normalization (7→8, 11→12 after normalize)
+                    if (!normUpc || !/^\d{8,14}$/.test(normUpc)) continue;
 
                     let cost = NaN;
                     if (costCol >= 0) cost = parseCost(row[costCol]);
@@ -1304,7 +1316,7 @@
                     const itemNum = itemCol >= 0 ? String(row[itemCol] ?? '').trim() : '';
                     pendingItems.push({
                         itemNumber: itemNum,
-                        upc: rawUpc.replace(/\D/g, ''),
+                        upc: normUpc,
                         cost: Math.round(cost * 100) / 100
                     });
                 }

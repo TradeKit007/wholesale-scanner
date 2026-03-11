@@ -18,6 +18,18 @@ const CONFIG = {
 
 const MIN_VALID_UPC_LENGTHS = [8, 12, 13, 14];
 
+/**
+ * Normalize UPC: Excel silently drops leading zeros (stores as number).
+ * e.g. "086486024761" (12-digit UPC-A) → Excel saves as 86486024761 (11 digits)
+ * Fix: pad 11→12 and 7→8 with leading zero to restore the original barcode.
+ */
+function normalizeUpc(raw) {
+    let digits = String(raw || '').replace(/[\s-]/g, '');
+    if (digits.length === 11) digits = '0' + digits; // UPC-A (12) with dropped leading 0
+    if (digits.length === 7) digits = '0' + digits; // UPC-E / EAN-8 with dropped leading 0
+    return digits;
+}
+
 async function getAccessToken() {
     const response = await axios.post('https://api.amazon.com/auth/o2/token', {
         grant_type: 'refresh_token',
@@ -644,14 +656,14 @@ async function processBatch(items, prepFee = 0.5, customBlacklist = []) {
     const profitable = [];
     const problematic = [];
 
-    // ── Validate UPCs ──
+    // ── Validate & Normalize UPCs ──
     const validItems = [];
     for (const item of items) {
-        const upc = String(item.upc || '').replace(/[\s-]/g, '');
+        const upc = normalizeUpc(item.upc); // restores leading zeros lost in Excel
         const cost = Number(item.cost) || 0;
         const rowBase = { UPC: upc, ItemNumber: item.itemNumber || '', Cost: cost };
         if (!MIN_VALID_UPC_LENGTHS.includes(upc.length)) {
-            rowBase.Problem = 'Invalid UPC length';
+            rowBase.Problem = 'Invalid UPC length (' + upc.length + ' digits: ' + upc + ')';
             problematic.push(rowBase);
         } else {
             validItems.push({ ...item, _cleanUpc: upc });
