@@ -680,7 +680,32 @@ async function processBatch(items, prepFee = 0.5, customBlacklist = []) {
     const asinMap = await getAsinBatch(upcs, token);
     console.log(`[Phase 1] ✅ Resolved ${Object.keys(asinMap).length}/${upcs.length} UPCs in ${((Date.now() - t0) / 1000).toFixed(1)}s`);
 
-    // Separate items not found in catalog
+    // ════════════════════════════════════════════
+    //  PHASE 1.5 — Individual retry for any UPCs
+    //  the batch lookup missed (rate-limit safety net)
+    //  If a 20-UPC batch got a 429, those items
+    //  get a second chance via individual 1-by-1 calls.
+    // ════════════════════════════════════════════
+    const missedUpcs = validItems
+        .map(i => i._cleanUpc)
+        .filter(upc => !asinMap[upc]);
+
+    if (missedUpcs.length > 0) {
+        console.log(`[Phase 1.5] ${missedUpcs.length} UPCs missed in batch → retrying individually...`);
+        for (const upc of missedUpcs) {
+            await sleep(600); // Stay well under the 2 req/s SP API rate limit
+            const singleResult = await getAsinBatch([upc], token);
+            if (singleResult[upc]) {
+                asinMap[upc] = singleResult[upc];
+                console.log(`[Phase 1.5]  ✅ Found on retry: ${upc} → ${singleResult[upc].map(d => d.asin).join(', ')}`);
+            } else {
+                console.log(`[Phase 1.5]  ❌ Truly not found: ${upc}`);
+            }
+        }
+        console.log(`[Phase 1.5] Done. Total resolved now: ${Object.keys(asinMap).length}/${upcs.length}`);
+    }
+
+    // Separate items still not found after retry
     const foundItems = validItems.filter(i => asinMap[i._cleanUpc]);
     for (const i of validItems.filter(i => !asinMap[i._cleanUpc])) {
         problematic.push({
@@ -688,6 +713,7 @@ async function processBatch(items, prepFee = 0.5, customBlacklist = []) {
             Problem: 'UPC not found in Catalog'
         });
     }
+
 
     if (foundItems.length === 0) return { profitable, problematic };
 
