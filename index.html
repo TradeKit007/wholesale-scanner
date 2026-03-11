@@ -415,15 +415,27 @@
     <div id="resultsBlock" class="hidden">
         <div class="flex justify-between items-center mb-4">
             <h2 class="text-xl font-bold text-white">🏆 Profitable Items</h2>
-            <button id="exportBtn"
-                class="bg-blue-600 hover:bg-blue-700 text-white font-semibold py-2 px-4 rounded shadow transition-colors flex items-center gap-2 text-sm">
-                <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"
-                    xmlns="http://www.w3.org/2000/svg">
-                    <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2"
-                        d="M4 16v1a3 3 0 003 3h10a3 3 0 003-3v-1m-4-4l-4 4m0 0l-4-4m4 4V4"></path>
-                </svg>
-                Export Selected
-            </button>
+            <div class="flex gap-3">
+                <button id="discardFilteredBtn" onclick="discardFiltered()"
+                    class="bg-red-600 hover:bg-red-700 text-white font-semibold py-2 px-4 rounded shadow transition-colors flex items-center gap-2 text-sm"
+                    title="Move all currently visible (filtered) items to the Problematic list">
+                    <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2"
+                            d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16">
+                        </path>
+                    </svg>
+                    Discard Filtered
+                </button>
+                <button id="exportBtn"
+                    class="bg-blue-600 hover:bg-blue-700 text-white font-semibold py-2 px-4 rounded shadow transition-colors flex items-center gap-2 text-sm">
+                    <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"
+                        xmlns="http://www.w3.org/2000/svg">
+                        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2"
+                            d="M4 16v1a3 3 0 003 3h10a3 3 0 003-3v-1m-4-4l-4 4m0 0l-4-4m4 4V4"></path>
+                    </svg>
+                    Export Selected
+                </button>
+            </div>
         </div>
         <div class="table-wrap overflow-x-auto mb-8">
             <table class="w-full text-left border-collapse" style="border-spacing:0">
@@ -1663,6 +1675,34 @@
                     <td class="p-4 text-red-600 text-sm font-medium">Manually Ignored ❌</td>
                 </tr>
             `;
+        }
+
+        window.discardFiltered = function () {
+            const visibleRows = document.querySelectorAll('#profTable tr:not([style*="display: none"])');
+            if (visibleRows.length === 0) {
+                alert("No visible items to discard.");
+                return;
+            }
+            if (!confirm(`Are you sure you want to discard ALL ${visibleRows.length} currently visible items?\n\nThey will be moved to the Problematic list.`)) return;
+
+            // Collect all HTML for errors to avoid forcing N repaints
+            let errorHtml = '';
+
+            visibleRows.forEach(tr => {
+                const upc = tr.dataset.upc || 'N/A';
+                const cost = tr.dataset.cost || '0';
+                errorHtml += `
+                    <tr class="border-b hover:bg-gray-50 bg-red-50/20" data-upc="${upc}" data-cost="${cost}" data-desc="${tr.dataset.desc || ''}" data-problem="Manually Ignored">
+                        <td class="p-4 font-mono text-sm">${upc}</td>
+                        <td class="p-4 text-sm">${cost}</td>
+                        <td class="p-4 text-sm max-w-[200px] truncate" title="${tr.dataset.desc || ''}">${tr.dataset.desc || ''}</td>
+                        <td class="p-4 text-red-600 text-sm font-medium">Manually Ignored ❌</td>
+                    </tr>
+                `;
+                tr.remove();
+            });
+
+            document.getElementById('errorTable').innerHTML += errorHtml;
         }
 
         // ==========================================
