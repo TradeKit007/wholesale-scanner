@@ -619,7 +619,7 @@ async function getAsinBatch(upcs, token) {
             console.warn(`[SP Batch] UPC batch ${i}–${i + BATCH} returned status ${res.status}`);
         }
 
-        if (i + BATCH < upcs.length) await sleep(1000); // Rate limit: give SP API 1s between calls
+        if (i + BATCH < upcs.length) await sleep(500); // 500ms between SP API catalog calls
     }
 
     return results;
@@ -691,18 +691,23 @@ async function processBatch(items, prepFee = 0.5, customBlacklist = []) {
         .filter(upc => !asinMap[upc]);
 
     if (missedUpcs.length > 0) {
-        console.log(`[Phase 1.5] ${missedUpcs.length} UPCs missed in batch → retrying individually...`);
-        for (const upc of missedUpcs) {
-            await sleep(600); // Stay well under the 2 req/s SP API rate limit
-            const singleResult = await getAsinBatch([upc], token);
-            if (singleResult[upc]) {
-                asinMap[upc] = singleResult[upc];
-                console.log(`[Phase 1.5]  ✅ Found on retry: ${upc} → ${singleResult[upc].map(d => d.asin).join(', ')}`);
-            } else {
-                console.log(`[Phase 1.5]  ❌ Truly not found: ${upc}`);
+        console.log(`[Phase 1.5] ${missedUpcs.length} UPCs missed in batch → retrying in groups of 3...`);
+        // Retry in small batches of 3 (much faster than one-by-one, still safe rate-limit-wise)
+        const RETRY_CHUNK = 3;
+        for (let r = 0; r < missedUpcs.length; r += RETRY_CHUNK) {
+            const chunk = missedUpcs.slice(r, r + RETRY_CHUNK);
+            await sleep(400); // 400ms between retry-chunks ≈ 1 req/s, well under SP API limit
+            const retryResult = await getAsinBatch(chunk, token);
+            for (const upc of chunk) {
+                if (retryResult[upc]) {
+                    asinMap[upc] = retryResult[upc];
+                    console.log(`[Phase 1.5]  ✅ Found: ${upc} → ${retryResult[upc].map(d => d.asin).join(', ')}`);
+                } else {
+                    console.log(`[Phase 1.5]  ❌ Not in catalog: ${upc}`);
+                }
             }
         }
-        console.log(`[Phase 1.5] Done. Total resolved now: ${Object.keys(asinMap).length}/${upcs.length}`);
+        console.log(`[Phase 1.5] Done. Resolved: ${Object.keys(asinMap).length}/${upcs.length}`);
     }
 
     // Separate items still not found after retry
