@@ -40,9 +40,9 @@ async function getAccessToken() {
     return response.data.access_token;
 }
 
-async function callSpApi(method, path, body = null, accessToken, retries = 3) {
+async function callSpApi(method, path, body = null, accessToken, retries = 5) {
     const host = 'sellingpartnerapi-na.amazon.com';
-    let delay = 1000;
+    let delay = 3000; // Start at 3s (pricing endpoint allows 0.5 req/s = 2s minimum)
 
     for (let attempt = 1; attempt <= retries + 1; attempt++) {
         const opts = {
@@ -69,18 +69,21 @@ async function callSpApi(method, path, body = null, accessToken, retries = 3) {
             });
 
             if (res.status === 429 && attempt <= retries) {
-                console.warn(`[API] 429 Rate Limit on ${path}. Attempt ${attempt}/${retries}. Retrying in ${delay}ms...`);
-                await sleep(delay);
-                delay *= 2; // Exponential backoff
+                // Respect Retry-After header if provided, otherwise exponential backoff
+                const retryAfterSec = parseFloat(res.headers?.['retry-after']) || 0;
+                const waitMs = retryAfterSec > 0 ? retryAfterSec * 1000 : delay;
+                console.warn(`[API] 429 Rate Limit on ${path.split('?')[0]}. Attempt ${attempt}/${retries}. Waiting ${(waitMs / 1000).toFixed(1)}s...`);
+                await sleep(waitMs);
+                delay = Math.min(delay * 2, 30000); // Exponential backoff, cap at 30s
                 continue;
             }
 
             return res;
         } catch (error) {
             if (attempt <= retries) {
-                console.error(`[API] Error on ${path}. Attempt ${attempt}/${retries}. ${error.message}`);
+                console.error(`[API] Error on ${path.split('?')[0]}. Attempt ${attempt}/${retries}. ${error.message}`);
                 await sleep(delay);
-                delay *= 2;
+                delay = Math.min(delay * 2, 30000);
                 continue;
             }
             throw error;
@@ -742,7 +745,7 @@ async function processBatch(items, prepFee = 0.5, customBlacklist = []) {
     for (const asin of asins) {
         const k = keepaMap[asin] || {};
         if (k.currentBBPrice && k.currentBBPrice > 0) {
-            // ✅ Use Keepa Buy Box — zero SP API calls
+            // ✅ Keepa current Buy Box price — zero SP API calls
             const hasAmz = k.amazonPrice && k.amazonPrice > 0;
             priceMap[asin] = {
                 price: k.currentBBPrice,
@@ -750,19 +753,32 @@ async function processBatch(items, prepFee = 0.5, customBlacklist = []) {
                 strategy: hasAmz ? 'Match BB (Amazon)' : 'Match BB FBA',
                 offersCount: k.currentOffersCount || 0,
             };
+        } else if (k.avg30 && k.avg30 > 0) {
+            // ✅ Keepa 30-day average as secondary fallback — still zero SP API calls
+            priceMap[asin] = {
+                price: k.avg30,
+                bb_price: k.avg30,
+                strategy: 'Keepa Avg30 (no live BB)',
+                offersCount: k.currentOffersCount || 0,
+            };
         } else {
-            needSpPrice.push(asin); // No Keepa price → SP API fallback
+            needSpPrice.push(asin); // Neither price available in Keepa → SP API
         }
     }
 
     if (needSpPrice.length > 0) {
-        const PARALLEL = 5;
-        console.log(`[Phase 3] Keepa missing price for ${needSpPrice.length}/${asins.length} ASINs → SP API fallback...`);
-        for (let i = 0; i < needSpPrice.length; i += PARALLEL) {
-            const chunk = needSpPrice.slice(i, i + PARALLEL);
-            const results = await Promise.all(chunk.map(a => getSmartPrice(a, token).catch(e => ({ error: e.message }))));
-            chunk.forEach((a, idx) => { priceMap[a] = results[idx]; });
-            if (i + PARALLEL < needSpPrice.length) await sleep(300);
+        // SP API pricing endpoint rate limit: 0.5 req/s = max 1 request every 2 seconds.
+        // Run sequentially with 2.1s gap = safe, no 429s.
+        const PRICE_PARALLEL = 2;
+        const PRICE_DELAY_MS = 2100; // > 2000ms to stay inside 0.5 req/s limit
+        console.log(`[Phase 3] Keepa missing price for ${needSpPrice.length}/${asins.length} ASINs → SP API (sequential, 2100ms gap)...`);
+        for (let i = 0; i < needSpPrice.length; i += PRICE_PARALLEL) {
+            const chunk = needSpPrice.slice(i, i + PRICE_PARALLEL);
+            // Run the chunk one-by-one with pauses, NOT in parallel
+            for (const a of chunk) {
+                priceMap[a] = await getSmartPrice(a, token).catch(e => ({ error: e.message }));
+                await sleep(PRICE_DELAY_MS);
+            }
         }
     }
 
