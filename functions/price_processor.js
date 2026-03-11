@@ -233,15 +233,8 @@ const AMAZON_SELLER_IDS = [
     'A2R2RITDJNW1Q6'  // Amazon (Other/Subsidiary often seen on Beauty/Grocery)
 ];
 
-async function getSmartPrice(asin, token) {
-    const path = `/products/pricing/v0/items/${asin}/offers?MarketplaceId=${CONFIG.marketplaceId}&ItemCondition=New`;
-    const res = await callSpApi('GET', path, null, token);
-
-    if (res.status !== 200 || !res.data.payload) {
-        return { error: `Failed to get offers (HTTP ${res.status})` };
-    }
-
-    const payload = res.data.payload;
+// Shared pricing payload parser — used by both single and batch pricing endpoints
+function parseSingleOfferPayload(payload) {
     const offers = payload.Offers || [];
     const summary = payload.Summary || {};
 
@@ -260,14 +253,11 @@ async function getSmartPrice(asin, token) {
         const buy_box_prices = summary.BuyBoxPrices || [];
         if (buy_box_prices.length > 0) {
             const p = buy_box_prices[0];
-            const listing = p.ListingPrice?.Amount || 0;
-            const shipping = p.Shipping?.Amount || 0;
-            bb_price = listing + shipping;
+            bb_price = (p.ListingPrice?.Amount || 0) + (p.Shipping?.Amount || 0);
         }
     }
 
-    let fba_amz_lowest = null;
-    let fbm_lowest = null;
+    let fba_amz_lowest = null, fbm_lowest = null;
     const fba_offers = [];
     let lowest_fba_is_amazon = false;
 
@@ -276,45 +266,40 @@ async function getSmartPrice(asin, token) {
         if (o.IsFulfilledByAmazon) {
             fba_offers.push({ total, isAmz: (!o.SellerFeedbackRating || AMAZON_SELLER_IDS.includes(o.SellerId)) });
         } else {
-            if (fbm_lowest === null || total < fbm_lowest) {
-                fbm_lowest = total;
-            }
+            if (fbm_lowest === null || total < fbm_lowest) fbm_lowest = total;
         }
     }
 
     if (fba_offers.length > 0) {
-        // Find the cheapest FBA offer
-        const cheapest_fba = fba_offers.reduce((prev, curr) => prev.total < curr.total ? prev : curr);
-        fba_amz_lowest = cheapest_fba.total;
-        lowest_fba_is_amazon = cheapest_fba.isAmz;
+        const cheapest = fba_offers.reduce((a, b) => a.total < b.total ? a : b);
+        fba_amz_lowest = cheapest.total;
+        lowest_fba_is_amazon = cheapest.isAmz;
     }
 
-    let calc_price = 0;
-    let strategy = "None";
-
+    let calc_price = 0, strategy = 'None';
     if (bb_price) {
         if (bb_is_fba) {
             calc_price = bb_price;
-            strategy = bb_is_amazon ? "Match BB Amz" : "Match BB FBA";
+            strategy = bb_is_amazon ? 'Match BB Amz' : 'Match BB FBA';
         } else {
-            const ideal_fbm_bump = bb_price * 1.15;
-            if (fba_amz_lowest !== null && fba_amz_lowest < ideal_fbm_bump) {
+            const ideal = bb_price * 1.15;
+            if (fba_amz_lowest !== null && fba_amz_lowest < ideal) {
                 calc_price = fba_amz_lowest;
-                strategy = lowest_fba_is_amazon ? "Match Lowest Amz" : "Match Lowest FBA";
+                strategy = lowest_fba_is_amazon ? 'Match Lowest Amz' : 'Match Lowest FBA';
             } else {
-                calc_price = ideal_fbm_bump;
-                strategy = "BB FBM + 15%";
+                calc_price = ideal;
+                strategy = 'BB FBM + 15%';
             }
         }
     } else {
         if (fba_amz_lowest !== null) {
             calc_price = fba_amz_lowest;
-            strategy = lowest_fba_is_amazon ? "Lowest Amz (No BB)" : "Lowest FBA (No BB)";
+            strategy = lowest_fba_is_amazon ? 'Lowest Amz (No BB)' : 'Lowest FBA (No BB)';
         } else if (fbm_lowest !== null) {
             calc_price = fbm_lowest * 1.15;
-            strategy = "FBM + 15% (No BB)";
+            strategy = 'FBM + 15% (No BB)';
         } else {
-            return { error: "Currently unavailable (OOS)" };
+            return { error: 'Currently unavailable (OOS)' };
         }
     }
 
@@ -324,6 +309,45 @@ async function getSmartPrice(asin, token) {
         bb_price: bb_price ? Number(bb_price.toFixed(2)) : null,
         offersCount: offers.length
     };
+}
+
+// Single-ASIN pricing (kept as fallback for edge cases)
+async function getSmartPrice(asin, token) {
+    const path = `/products/pricing/v0/items/${asin}/offers?MarketplaceId=${CONFIG.marketplaceId}&ItemCondition=New`;
+    const res = await callSpApi('GET', path, null, token);
+    if (res.status !== 200 || !res.data.payload) {
+        return { error: `Failed to get offers (HTTP ${res.status})` };
+    }
+    return parseSingleOfferPayload(res.data.payload);
+}
+
+// BATCH pricing — up to 20 ASINs per call
+// Rate limit: 0.1 req/s = 1 call per 10s. For 20 items: 1 call vs 20 individual calls × 2s = 4× faster.
+async function getSmartPriceBatch(asins, token) {
+    if (!asins || asins.length === 0) return {};
+    const requests = asins.map(asin => ({
+        uri: `/products/pricing/v0/items/${asin}/offers`,
+        method: 'GET',
+        MarketplaceId: CONFIG.marketplaceId,
+        ItemCondition: 'New'
+    }));
+    const res = await callSpApi('POST', '/batches/products/pricing/v0/itemOffers', { requests }, token);
+    if (res.status !== 200 || !res.data.responses) {
+        console.warn(`[PriceBatch] Failed HTTP ${res.status} — fallback to error for all`);
+        return Object.fromEntries(asins.map(a => [a, { error: `Batch pricing failed (HTTP ${res.status})` }]));
+    }
+    const results = {};
+    for (const resp of res.data.responses) {
+        const uriMatch = resp.request?.uri?.match(/items\/([^\/]+)\/offers/);
+        if (!uriMatch) continue;
+        const asin = uriMatch[1];
+        if (resp.status?.statusCode !== 200 || !resp.body?.payload) {
+            results[asin] = { error: `Item pricing HTTP ${resp.status?.statusCode}` };
+            continue;
+        }
+        results[asin] = parseSingleOfferPayload(resp.body.payload);
+    }
+    return results;
 }
 
 async function getFees(asin, price, token) {
@@ -767,17 +791,17 @@ async function processBatch(items, prepFee = 0.5, customBlacklist = []) {
     }
 
     if (needSpPrice.length > 0) {
-        // SP API pricing endpoint rate limit: 0.5 req/s = max 1 request every 2 seconds.
-        // Run sequentially with 2.1s gap = safe, no 429s.
-        const PRICE_PARALLEL = 2;
-        const PRICE_DELAY_MS = 2100; // > 2000ms to stay inside 0.5 req/s limit
-        console.log(`[Phase 3] Keepa missing price for ${needSpPrice.length}/${asins.length} ASINs → SP API (sequential, 2100ms gap)...`);
-        for (let i = 0; i < needSpPrice.length; i += PRICE_PARALLEL) {
-            const chunk = needSpPrice.slice(i, i + PRICE_PARALLEL);
-            // Run the chunk one-by-one with pauses, NOT in parallel
-            for (const a of chunk) {
-                priceMap[a] = await getSmartPrice(a, token).catch(e => ({ error: e.message }));
-                await sleep(PRICE_DELAY_MS);
+        // BATCH pricing endpoint: 20 ASINs per call, rate 0.1 req/s = 1 call per 10s
+        // For 20 items: 1 call (10s) vs individual 20×2s = 40s — 4× faster!
+        const PRICE_BATCH = 20;
+        console.log(`[Phase 3] SP API batch pricing for ${needSpPrice.length} ASINs (${Math.ceil(needSpPrice.length / PRICE_BATCH)} calls)...`);
+        for (let i = 0; i < needSpPrice.length; i += PRICE_BATCH) {
+            const chunk = needSpPrice.slice(i, i + PRICE_BATCH);
+            const batchResult = await getSmartPriceBatch(chunk, token);
+            Object.assign(priceMap, batchResult);
+            if (i + PRICE_BATCH < needSpPrice.length) {
+                console.log(`[Phase 3] Waiting 11s between pricing batch calls (rate limit 0.1 req/s)...`);
+                await sleep(11000);
             }
         }
     }
