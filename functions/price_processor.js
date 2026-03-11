@@ -337,14 +337,20 @@ async function getSmartPriceBatch(asins, token) {
         return Object.fromEntries(asins.map(a => [a, { error: `Batch pricing failed (HTTP ${res.status})` }]));
     }
     const results = {};
-    for (const resp of res.data.responses) {
-        const uriMatch = resp.request?.uri?.match(/items\/([^\/]+)\/offers/);
-        if (!uriMatch) continue;
-        const asin = uriMatch[1];
-        if (resp.status?.statusCode !== 200 || !resp.body?.payload) {
-            results[asin] = { error: `Item pricing HTTP ${resp.status?.statusCode}` };
+    for (let j = 0; j < asins.length; j++) {
+        const asin = asins[j];
+        const resp = res.data.responses[j];
+
+        if (!resp) {
+            results[asin] = { error: 'No response from batch' };
             continue;
         }
+
+        if (resp.status?.statusCode !== 200 || !resp.body?.payload) {
+            results[asin] = { error: `Item pricing HTTP ${resp.status?.statusCode || 'Unknown'}` };
+            continue;
+        }
+
         results[asin] = parseSingleOfferPayload(resp.body.payload);
     }
     return results;
