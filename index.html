@@ -1733,8 +1733,8 @@
                     const cellText = td.innerText.toLowerCase();
 
                     // Numeric filtering logic for numeric columns 
-                    // (Cost=6, BSR=7, Rating=9, Reviews=10, Drops=11, Sellers=12, Targets=14, Avg30=15, Profit=16, ROI=17)
-                    if ([6, 7, 9, 10, 11, 12, 14, 15, 16, 17].includes(filter.colIndex)) {
+                    // (Cost=7, BSR=8, Rating=10, Reviews=11, Drops=12, Sellers=13, CalcPrice=15, Avg30=16, Profit=17, ROI=18)
+                    if ([7, 8, 10, 11, 12, 13, 15, 16, 17, 18].includes(filter.colIndex)) {
                         let isLessThan = filterText.startsWith('<');
                         let isGreaterThan = filterText.startsWith('>');
 
@@ -1743,6 +1743,7 @@
                             if (operatorFreeText === '') return; // " > " typed but no number yet
 
                             let filterVal = parseFloat(operatorFreeText);
+                            if (operatorFreeText.endsWith('k')) filterVal *= 1000;
                             if (isNaN(filterVal)) return;
 
                             // Extract the actual numeric value from the table cell (stripping $, +, , etc)
