@@ -1384,9 +1384,9 @@
                 let blacklist = []; // Backend will fetch Google sheets automatically
                 resultsBlock.classList.remove('hidden');
 
-                const BATCH_SIZE = 50;       // Items per Firebase call
-                const PARALLEL = 1;          // Sequential (NOT parallel) — prevents SP API 429 rate-limit errors
-                // (3 parallel calls × 3 SP API calls each = 9 concurrent = throttling)
+                const BATCH_SIZE = 100;      // Items per Firebase call (Optimized for Keepa efficiency)
+                const PARALLEL = 3;          // Run 3 functions concurrently (Processing 300 items at a time!)
+                // With token-free FBA estimation and 0-cost Keepa calls, this flies through the list.
                 let totalProcessed = 0;
 
                 // Split all items into batches
