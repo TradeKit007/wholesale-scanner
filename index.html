@@ -1375,8 +1375,9 @@
                 let blacklist = []; // Backend will fetch Google sheets automatically
                 resultsBlock.classList.remove('hidden');
 
-                const BATCH_SIZE = 50;       // Larger batch → fewer Firebase calls
-                const PARALLEL = 3;         // Send 3 batches at once → 3x speedup
+                const BATCH_SIZE = 50;       // Items per Firebase call
+                const PARALLEL = 1;          // Sequential (NOT parallel) — prevents SP API 429 rate-limit errors
+                // (3 parallel calls × 3 SP API calls each = 9 concurrent = throttling)
                 let totalProcessed = 0;
 
                 // Split all items into batches
@@ -1417,9 +1418,9 @@
 
                     if (isProcessingCanceled) break;
 
-                    // Short pause to keep UI responsive — uses a single setTimeout (not throttled like loops)
+                    // Pause between batches to let SP API rate limits recover
                     if (g + PARALLEL < totalBatches) {
-                        await new Promise(r => setTimeout(r, 500));
+                        await new Promise(r => setTimeout(r, 1500));
                     }
                 }
 

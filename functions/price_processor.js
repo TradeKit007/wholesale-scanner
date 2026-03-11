@@ -619,7 +619,7 @@ async function getAsinBatch(upcs, token) {
             console.warn(`[SP Batch] UPC batch ${i}–${i + BATCH} returned status ${res.status}`);
         }
 
-        if (i + BATCH < upcs.length) await sleep(500); // SP API rate limit between batches
+        if (i + BATCH < upcs.length) await sleep(1000); // Rate limit: give SP API 1s between calls
     }
 
     return results;
