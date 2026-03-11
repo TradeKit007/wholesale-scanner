@@ -427,14 +427,44 @@ function keepaMinutesToMs(km) { return (km + KEEPA_EPOCH_MIN) * 60000; }
 function countBsrDrops30(bsrCsv) {
     if (!bsrCsv || bsrCsv.length < 4) return null;
     const cutoffMs = Date.now() - 30 * 24 * 3600 * 1000;
+
     let drops = 0;
-    let prevBsr = null;
+    let lastValidPeak = null;
+
     for (let i = 0; i < bsrCsv.length - 1; i += 2) {
-        if (keepaMinutesToMs(bsrCsv[i]) < cutoffMs) continue;
         const bsr = bsrCsv[i + 1];
         if (bsr < 0) continue; // -1 = no data
-        if (prevBsr !== null && bsr < prevBsr) drops++;
-        prevBsr = bsr;
+
+        if (keepaMinutesToMs(bsrCsv[i]) < cutoffMs) {
+            lastValidPeak = bsr; // Seed the peak before cutoff
+            continue;
+        }
+
+        if (lastValidPeak !== null) {
+            // If BSR worsens (goes up), track the new peak
+            if (bsr > lastValidPeak) {
+                lastValidPeak = bsr;
+            }
+            // If BSR improves (goes down), check if it's significant enough
+            else {
+                const dropAmt = lastValidPeak - bsr;
+                const dropPct = dropAmt / lastValidPeak;
+
+                // Noise thresholds: High BSRs fluctuate heavily without sales
+                let minReqPct = 0;
+                if (lastValidPeak > 600000) minReqPct = 0.06;      // 6% drop required
+                else if (lastValidPeak > 300000) minReqPct = 0.04; // 4% drop required
+                else if (lastValidPeak > 100000) minReqPct = 0.02; // 2% drop required
+                else if (lastValidPeak > 20000) minReqPct = 0.01;  // 1% drop required
+
+                if (dropAmt > 1 && dropPct >= minReqPct) {
+                    drops++;
+                    lastValidPeak = bsr; // Reset peak after counting the drop
+                }
+            }
+        } else {
+            lastValidPeak = bsr;
+        }
     }
     return drops;
 }
