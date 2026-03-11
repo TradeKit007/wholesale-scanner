@@ -724,7 +724,7 @@ async function processBatch(items, prepFee = 0.5, customBlacklist = []) {
     for (const item of items) {
         const upc = normalizeUpc(item.upc); // restores leading zeros lost in Excel
         const cost = Number(item.cost) || 0;
-        const rowBase = { UPC: upc, ItemNumber: item.itemNumber || '', Cost: cost };
+        const rowBase = { UPC: upc, ItemNumber: item.itemNumber || '', Cost: cost, Description: item.description || '' };
         if (!MIN_VALID_UPC_LENGTHS.includes(upc.length)) {
             rowBase.Problem = 'Invalid UPC length (' + upc.length + ' digits: ' + upc + ')';
             problematic.push(rowBase);
@@ -778,6 +778,7 @@ async function processBatch(items, prepFee = 0.5, customBlacklist = []) {
     for (const i of validItems.filter(i => !asinMap[i._cleanUpc])) {
         problematic.push({
             UPC: i._cleanUpc, ItemNumber: i.itemNumber || '', Cost: Number(i.cost) || 0,
+            Description: i.description || '',
             Problem: 'UPC not found in Catalog'
         });
     }
@@ -867,6 +868,7 @@ async function processBatch(items, prepFee = 0.5, customBlacklist = []) {
             const rowData = {
                 UPC: upc, ItemNumber: item.itemNumber || '',
                 Cost: cost,
+                Description: item.description || '',
                 EffectiveCost: Number(effectiveCost.toFixed(2)),
                 VarCount: packMultiplier,
                 ASIN: asin, ParentASIN: asinData.parentAsin || null,
