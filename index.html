@@ -1397,7 +1397,7 @@
                 resultsBlock.classList.remove('hidden');
 
                 const BATCH_SIZE = 100;      // Items per Firebase call (Optimized for Keepa efficiency)
-                const PARALLEL = 3;          // Run 3 functions concurrently (Processing 300 items at a time!)
+                const PARALLEL = 2;          // Run 2 functions concurrently (Processing 200 items at a time)
                 // With token-free FBA estimation and 0-cost Keepa calls, this flies through the list.
                 let totalProcessed = 0;
 

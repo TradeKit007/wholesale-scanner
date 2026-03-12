@@ -503,9 +503,10 @@ async function getKeepaDataBatch(asins) {
 
     for (let i = 0; i < asins.length; i += KEEPA_CHUNK) {
         const chunk = asins.slice(i, i + KEEPA_CHUNK);
-        // stats=0, offers=0 to avoid extreme token consumption which causes 429s for 7000 items
+        // history=1 is required to get the CSV arrays containing rating, reviews, drops, prices, and BSR!
+        // rating=1 gets the rating history.
         const url = `https://api.keepa.com/product?key=${CONFIG.keepaApiKey}&domain=1` +
-            `&asin=${chunk.join(',')}&stats=0&rating=1&offers=0`;
+            `&asin=${chunk.join(',')}&history=1&rating=1`;
         try {
             const res = await axios.get(url, { validateStatus: () => true, timeout: 45000 });
 
@@ -577,20 +578,16 @@ async function getKeepaDataBatch(asins) {
                     referralFeeDecimal = rawRefPct > 100 ? rawRefPct / 10000 : rawRefPct / 100;
                 }
 
-                // ── Current Buy Box & Amazon Price ──
                 let currentBBPrice = null;
                 let amazonPrice = null;
+                let newPrice = null;
 
-                // Without stats=X, we read the LAST value from CSV arrays:
-                // csv[18] = Buy Box. The last odd index is the price (integer cents).
+                // csv[18] = Buy Box.
                 if (product.csv?.[18]?.length >= 2) {
                     const bbarr = product.csv[18];
                     const startK = (bbarr.length - 1) % 2 === 1 ? (bbarr.length - 1) : (bbarr.length - 2);
                     for (let k = startK; k >= 1; k -= 2) {
-                        // Some values might be -1 if out of stock
-                        if (bbarr[k] > 0 && bbarr[k] < 999900) { // Sanity: < $9999 (>$9999 = likely a Keepa timestamp)
-                            currentBBPrice = bbarr[k] / 100; break;
-                        }
+                        if (bbarr[k] > 0 && bbarr[k] < 999900) { currentBBPrice = bbarr[k] / 100; break; }
                     }
                 }
 
@@ -601,6 +598,21 @@ async function getKeepaDataBatch(asins) {
                     for (let k = startK; k >= 1; k -= 2) {
                         if (amzarr[k] > 0 && amzarr[k] < 999900) { amazonPrice = amzarr[k] / 100; break; }
                     }
+                }
+
+                // csv[1] = New Market
+                if (product.csv?.[1]?.length >= 2) {
+                    const newarr = product.csv[1];
+                    const startK = (newarr.length - 1) % 2 === 1 ? (newarr.length - 1) : (newarr.length - 2);
+                    for (let k = startK; k >= 1; k -= 2) {
+                        if (newarr[k] > 0 && newarr[k] < 999900) { newPrice = newarr[k] / 100; break; }
+                    }
+                }
+
+                // Fallback: If we didn't pay for Keepa BB tokens, approximate BB with lowest New or Amazon Price
+                if (!currentBBPrice && (newPrice || amazonPrice)) {
+                    currentBBPrice = newPrice || amazonPrice;
+                    if (amazonPrice && amazonPrice < currentBBPrice) currentBBPrice = amazonPrice;
                 }
 
                 let currentOffersCount = product.offersSuccessful || 0;
