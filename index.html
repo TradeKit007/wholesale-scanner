@@ -1748,7 +1748,7 @@
 
                             // Extract the actual numeric value from the table cell (stripping $, +, , etc)
                             // Note: BSR cell format includes "\n" and Category name, we must parse only the first line/number.
-                            let cellValStr = cellText.split('\n')[0].replace(/[^0-9.-]/g, '');
+                            let cellValStr = cellText.trim().split('\n')[0].replace(/[^0-9.-]/g, '');
 
                             // If the item has a dash (e.g. OOS items with no calculatable ROI),
                             // or N/A / 'No Key' rating — we skip the check so they always stay visible.
