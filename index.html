@@ -299,7 +299,19 @@
                 <div class="w-px h-8" style="background:#30363d"></div>
 
                 <!-- Buttons -->
-                <button id="processBtn" disabled
+                
+                <!-- Fast Workflow -->
+                <button id="fastKeepaExportBtn" disabled class="bg-purple-600 hover:bg-purple-700 disabled:opacity-40 disabled:cursor-not-allowed text-white text-sm font-bold py-2 px-4 rounded-lg shadow flex items-center gap-2">
+                    ⚡ 1. Export for Keepa
+                </button>
+                <div class="relative">
+                    <button id="fastKeepaImportBtn" class="bg-teal-600 hover:bg-teal-700 text-white text-sm font-bold py-2 px-4 rounded-lg shadow flex items-center gap-2" onclick="document.getElementById('keepaFileInput').click()">
+                        📥 2. Load Keepa Excel
+                    </button>
+                    <input type="file" id="keepaFileInput" accept=".xlsx,.xls,.csv" class="hidden" onchange="handleKeepaExcel(event)">
+                </div>
+
+<button id="processBtn" disabled
                     class="bg-green-500 hover:bg-green-600 disabled:opacity-40 disabled:cursor-not-allowed text-white text-sm font-bold py-2 px-5 rounded-lg shadow transition-all flex items-center gap-2 whitespace-nowrap">
                     <svg class="hidden animate-spin h-4 w-4 text-white" id="spinner" xmlns="http://www.w3.org/2000/svg"
                         fill="none" viewBox="0 0 24 24">
@@ -1365,6 +1377,7 @@
             }
 
             processBtn.disabled = pendingItems.length === 0;
+            document.getElementById('fastKeepaExportBtn').disabled = pendingItems.length === 0;
         });
 
 
@@ -1375,6 +1388,159 @@
         document.getElementById('colMappingOverlay').addEventListener('click', function (e) {
             if (e.target === this) this.classList.remove('pdf-modal-open');
         });
+
+
+        
+        document.getElementById('fastKeepaExportBtn').addEventListener('click', async () => {
+            if (pendingItems.length === 0) return;
+            const btn = document.getElementById('fastKeepaExportBtn');
+            btn.disabled = true;
+            spinner.classList.remove('hidden');
+            statusText.innerText = 'Extracting ASINs (Fast Mode)...';
+            
+            try {
+                const prepFeeVal = parseFloat(document.getElementById('prepFeeInput').value) || 0;
+                const BATCH_SIZE = 100;
+                let allAsins = [];
+                let localMap = {};
+
+                for (let i = 0; i < pendingItems.length; i += BATCH_SIZE) {
+                    const chunk = pendingItems.slice(i, i + BATCH_SIZE);
+                    statusText.innerText = `Amazon ASIN Batch ${Math.round(i / pendingItems.length * 100)}%...`;
+                    
+                    const res = await fetch(CONFIG.analyzeUrl, {
+                        method: 'POST',
+                        headers: { 'Content-Type': 'application/json' },
+                        body: JSON.stringify({ items: chunk, prepFee: prepFeeVal, blacklist: [], mode: 'export_asins' })
+                    });
+                    
+                    if (!res.ok) throw new Error('API Error');
+                    const data = await res.json();
+                    
+                    if (data.profitable) {
+                        data.profitable.forEach(p => {
+                            if (p.ASIN && p.ASIN !== 'N/A') {
+                                allAsins.push(p.ASIN);
+                                localMap[p.ASIN] = {
+                                    UPC: p.UPC, Cost: p.Cost, ItemNumber: p.ItemNumber, Description: p.Description
+                                };
+                            }
+                        });
+                    }
+                }
+                
+                if (allAsins.length > 0) {
+                    localStorage.setItem('keepaFastMap', JSON.stringify(localMap));
+                    const blob = new Blob([allAsins.join('\n')], { type: 'text/plain' });
+                    const url = URL.createObjectURL(blob);
+                    const a = document.createElement('a');
+                    a.href = url;
+                    a.download = 'ASINs_for_Keepa.txt';
+                    a.click();
+                    URL.revokeObjectURL(url);
+                    statusText.innerText = '✅ Downloaded. Upload to Keepa Product Viewer!';
+                } else {
+                    statusText.innerText = '⚠️ No ASINs found for these UPCs.';
+                }
+            } catch (err) {
+                statusText.innerText = '❌ Error Exporting ASINs: ' + err.message;
+            } finally {
+                btn.disabled = false;
+                spinner.classList.add('hidden');
+            }
+        });
+
+        window.handleKeepaExcel = function(e) {
+            const file = e.target.files[0];
+            if (!file) return;
+            
+            const reader = new FileReader();
+            reader.onload = function (e) {
+                const data = new Uint8Array(e.target.result);
+                const workbook = XLSX.read(data, { type: 'array' });
+                const firstSheetName = workbook.SheetNames[0];
+                const worksheet = workbook.Sheets[firstSheetName];
+                const rows = XLSX.utils.sheet_to_json(worksheet, { header: 1 });
+                
+                if (rows.length < 2) return alert('Keepa Excel is empty');
+                
+                const headers = rows[0].map(h => typeof h === 'string' ? h.toLowerCase() : '');
+                const asinIdx = headers.findIndex(h => h.includes('asin'));
+                const bsrIdx = headers.findIndex(h => h === 'sales rank: current');
+                const bbIdx = headers.findIndex(h => h === 'buy box: current');
+                const amzIdx = headers.findIndex(h => h === 'amazon: current');
+                const ratIdx = headers.findIndex(h => h === 'rating');
+                const revIdx = headers.findIndex(h => h === 'review count');
+                const dropIdx = headers.findIndex(h => h === 'sales rank: drops last 30 days');
+                const offersIdx = headers.findIndex(h => h === 'new offer count: current');
+                const fbaFeeIdx = headers.findIndex(h => h.includes('fba pick&pack fee') || h.includes('fee'));
+                const catIdx = headers.findIndex(h => h === 'categories: root');
+                const brandIdx = headers.findIndex(h => h === 'brand');
+                const refFeeIdx = headers.findIndex(h => h.includes('referral fee %'));
+                
+                const savedMapStr = localStorage.getItem('keepaFastMap');
+                const localMap = savedMapStr ? JSON.parse(savedMapStr) : {};
+                const prepFeeVal = parseFloat(document.getElementById('prepFeeInput').value) || 0.5;
+                
+                const profitable = [];
+                const problematic = [];
+                
+                for (let i = 1; i < rows.length; i++) {
+                    const r = rows[i];
+                    const asin = r[asinIdx];
+                    if (!asin || !localMap[asin]) continue; // skip if not matching our list
+                    
+                    const orig = localMap[asin];
+                    const bbRaw = parseFloat(String(r[bbIdx] || '').replace(/[^0-9.]/g, ''));
+                    const amzRaw = parseFloat(String(r[amzIdx] || '').replace(/[^0-9.]/g, ''));
+                    let price = !isNaN(bbRaw) && bbRaw > 0 ? bbRaw : amzRaw;
+                    let strategy = !isNaN(bbRaw) && bbRaw > 0 ? 'Match BB FBA' : (amzRaw > 0 ? 'Match BB (Amazon)' : 'OOS / No Price');
+                    
+                    if (isNaN(price) || price <= 0) {
+                        problematic.push({ UPC: orig.UPC, ItemNumber: orig.ItemNumber, Cost: orig.Cost, Description: orig.Description, Problem: 'No Price in Keepa' });
+                        continue;
+                    }
+                    
+                    let refFeePct = parseFloat(String(r[refFeeIdx] || '').replace(/[^0-9.]/g, '')) || 15;
+                    let fbaFee = parseFloat(String(r[fbaFeeIdx] || '').replace(/[^0-9.]/g, '')) || (price * 0.15); 
+                    
+                    // Total Amz Fee
+                    const totalAmzFee = fbaFee + (price * (refFeePct / 100));
+                    const netProfit = price - orig.Cost - totalAmzFee - prepFeeVal;
+                    const roi = orig.Cost > 0 ? (netProfit / orig.Cost) * 100 : 0;
+                    
+                    profitable.push({
+                        UPC: orig.UPC, ItemNumber: orig.ItemNumber, Description: orig.Description,
+                        Cost: orig.Cost, EffectiveCost: orig.Cost, VarCount: 1,
+                        ASIN: asin, ParentASIN: null, Title: r[headers.findIndex(h => h === 'title')] || 'N/A', 
+                        Brand: r[brandIdx] || 'N/A', Category: r[catIdx] || 'N/A',
+                        BSR: r[bsrIdx] || -1, BSRDrop: r[dropIdx] > 0 ? '✅ Good' : '🛑 Slow',
+                        KeepaRating: r[ratIdx] || 'N/A', KeepaReviews: r[revIdx] || 'N/A',
+                        KeepaDrops: r[dropIdx] || 'N/A', KeepaAvg30: price,
+                        BuyBoxPrice: price, Strategy: strategy, CalcPrice: price, 
+                        OffersCount: r[offersIdx] || 0, NetProfit: netProfit, ROI: roi,
+                        BrandRisk: 'Clear'
+                    });
+                }
+                
+                window.lastProfitable = profitable;
+                window.lastProblematic = problematic;
+                document.getElementById('resultsBlock').classList.remove('hidden');
+                
+                // Add sorting logic back
+                profitable.sort((a,b) => b.ROI - a.ROI);
+                
+                if (typeof renderTable === 'function') renderTable(profitable);
+                // Also trigger error table
+                const errorTable = document.getElementById('errorTable');
+                if (errorTable) {
+                   errorTable.innerHTML = problematic.map((p, ix) => `<tr><td class="px-4 py-2 text-sm text-gray-300 border-b border-gray-700">${p.UPC||''}</td><td class="px-4 py-2 text-sm text-gray-300 border-b border-gray-700 font-bold">${p.Problem||''}</td></tr>`).join('');
+                }
+                
+                statusText.innerText = `✅ Processed Keepa Export: ${profitable.length} Profitable (${Date.now() - e.timeStamp} ms)`;
+            };
+            reader.readAsArrayBuffer(file);
+        };
 
 
         processBtn.addEventListener('click', async () => {

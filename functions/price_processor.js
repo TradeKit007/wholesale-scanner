@@ -715,12 +715,13 @@ async function getAsinBatch(upcs, token) {
 }
 
 /**
- * Process a batch of rows — OPTIMIZED (batch UPC→ASIN + Keepa batch + parallel prices).
- * @param {Array<{upc: string, cost: number}>} items
- * @param {number} prepFee The cost per unit handling fee
- * @returns {Promise<{profitable: Array, problematic: Array}>}
+ * Process a batch of rows
+ * @param {Array} items
+ * @param {number} prepFee
+ * @param {Array} customBlacklist
+ * @param {string} mode - 'full' or 'export_asins'
  */
-async function processBatch(items, prepFee = 0.5, customBlacklist = []) {
+async function processBatch(items, prepFee = 0.5, customBlacklist = [], mode = 'full') {
     // ── Fetch centralized blacklist ──
     let blacklist = customBlacklist || [];
     try {
@@ -811,6 +812,29 @@ async function processBatch(items, prepFee = 0.5, customBlacklist = []) {
 
 
     if (foundItems.length === 0) return { profitable, problematic };
+
+    // ════════════════════════════════════════════
+    //  FAST MODE (EXPORT ONLY)
+    // ════════════════════════════════════════════
+    if (mode === 'export_asins') {
+        const asinsExport = [];
+        for (const item of foundItems) {
+            const asm = asinMap[item._cleanUpc] || [];
+            for (const am of asm) {
+                asinsExport.push({
+                    UPC: item._cleanUpc,
+                    Cost: item.cost,
+                    ItemNumber: item.itemNumber || '',
+                    Description: item.description || '',
+                    ASIN: am.asin,
+                    Title: am.title,
+                    Category: am.category,
+                    BSR: am.main_bsr || 'N'
+                });
+            }
+        }
+        return { profitable: asinsExport, problematic };
+    }
 
     // ════════════════════════════════════════════
     //  PHASE 2 — Keepa BATCH: all ASINs in 1 call

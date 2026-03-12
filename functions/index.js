@@ -62,11 +62,12 @@ exports.analyzePriceList = onRequest({
         const rawPrepFee = parseFloat(req.body.prepFee);
         const prepFee = isNaN(rawPrepFee) ? 0.50 : rawPrepFee;
         const blacklist = req.body.blacklist || [];
+        const mode = req.body.mode || 'full';
 
-        console.log(`📥 Принят запрос на анализ ${items.length} товаров. Prep Fee: $${prepFee}`);
+        console.log(`📥 Принят запрос на анализ ${items.length} товаров. Prep Fee: $${prepFee}, Mode: ${mode}`);
 
         // Передаем товары в наш новый модуль обработки
-        const results = await priceProcessor.processBatch(items, prepFee, blacklist);
+        const results = await priceProcessor.processBatch(items, prepFee, blacklist, mode);
 
         console.log(`✅ Обработка завершена! Профитных: ${results.profitable.length}, Проблемных: ${results.problematic.length}`);
 
@@ -80,3 +81,4 @@ exports.analyzePriceList = onRequest({
         res.status(500).send({ error: error.message });
     }
 });
+// force redeploy Fri Mar  6 16:17:22 EET 2026
