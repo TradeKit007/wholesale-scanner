@@ -1388,7 +1388,7 @@
                 statusText.innerText = 'Loaded ' + pendingItems.length + ' items from PDF. Ready to process!';
             }
 
-            processBtn.disabled = pendingItems.length === 0;
+            processBtn.disabndingItems.length === 0;
             document.getElementById('fastKeepaExportBtn').disabled = pendingItems.length === 0;
         });
 
@@ -1396,8 +1396,7 @@
         // Close modal on Escape or clicking outside
         document.addEventListener('keydown', e => {
             if (e.key === 'Escape') document.getElementById('colMappingOverlay').classList.remove('pdf-modal-open');
-        });
-        document.getElementById('colMappingOverlay').addEventListener('click', function (e) {
+        });ument.getElementById('colMappingOverlay').addEventListener('click', function (e) {
             if (e.target === this) this.classList.remove('pdf-modal-open');
         });
 
@@ -1408,62 +1407,52 @@
             const btn = document.getElementById('fastKeepaExportBtn');
             btn.disabled = true;
             spinner.classList.remove('hidden');
-            statusText.innerText = 'Extracting ASINs (Fast Mode)...';
+            statusTerating Export...';
 
             try {
-                const prepFeeVal = parseFloat(document.getElementById('prepFeeInput').value) || 0;
-                const BATCH_SIZE = 100;
-                let allAsins = [];
+                let allIds = [];
                 let localMap = {};
 
-                for (let i = 0; i < pendingItems.length; i += BATCH_SIZE) {
-                    const chunk = pendingItems.slice(i, i + BATCH_SIZE);
-                    statusText.innerText = `Amazon ASIN Batch ${Math.round(i / pendingItems.length * 100)}%...`;
+                // Map identifiers offline immediately. Avoid SP API.
+                pendingItems.forEach(p => {
+                    const id = p.asin || p.upc;
+                    if (id) {
+                                             
+                        const savedData = {
+                            UPC: p.upc || '', Cosr: p.itemNumber || '', Description: p.description || ''
+                        };
+                        
+                        // Link BOTH combinations so Keepa excel can match it if it comes back as UPC or ASIN
+                        if (p.asin) localMap[p.asin.toUpperCase()] = savedData;
+                        if (p.upc) {
+                            localMap[p.upc.replace(/^0+/, '')] = savedData; // Store stripped version for matching
+                            localMap[p.upc] = savedData;
+                              }
+                });
 
-                    const res = await fetch(FIREBASE_API_URL, {
-                        method: 'POST',
-                        headers: { 'Content-Type': 'application/json' },
-                        body: JSON.stringify({ items: chunk, prepFee: prepFeeVal, blacklist: [], mode: 'export_asins' })
-                    });
-
-                    if (!res.ok) throw new Error('API Error');
-                    const data = await res.json();
-
-                    if (data.profitable) {
-                        data.profitable.forEach(p => {
-                            if (p.ASIN && p.ASIN !== 'N/A') {
-                                allAsins.push(p.ASIN);
-                                localMap[p.ASIN] = {
-                                    UPC: p.UPC, Cost: p.Cost, ItemNumber: p.ItemNumber, Description: p.Description
-                                };
-                            }
-                        });
-                    }
-                }
-
-                if (allAsins.length > 0) {
+                if (allIds.length > 0) {
                     localStorage.setItem('keepaFastMap', JSON.stringify(localMap));
-                    const blob = new Blob([allAsins.join('\n')], { type: 'text/plain' });
+                    const blob = new Blob([allIds.join('\n')], { type: 'text/plain' });
                     const url = URL.createObjectURL(blob);
                     const a = document.createElement('a');
                     a.href = url;
-                    a.download = 'ASINs_for_Keepa.txt';
+                    a.download = 'Identifiers_for_Keepa.txt';
                     a.click();
                     URL.revokeObjectURL(url);
-                    statusText.innerText = '✅ Downloaded. Upload to Keepa Product Viewer!';
+                    statusText.innerText = `✅ Downloaded ${allIds.length} items. Upload to Keepa Product Viewer!`;
                 } else {
-                    statusText.innerText = '⚠️ No ASINs found for these UPCs.';
+                    statusText.innerText = '⚠️ No valid UPCs or ASINs found in file.';
                 }
             } catch (err) {
-                statusText.innerText = '❌ Error Exporting ASINs: ' + err.message;
+                statusText.innerText = '❌ Error Exporting: ' + err.message;
             } finally {
                 btn.disabled = false;
                 spinner.classList.add('hidden');
-            }
+             }
         });
 
         window.handleKeepaExcel = function (e) {
-            const file = e.target.files[0];
+      file = e.target.files[0];
             if (!file) return;
 
             const reader = new FileReader();
@@ -1472,9 +1461,9 @@
                 const workbook = XLSX.read(data, { type: 'array' });
                 const firstSheetName = workbook.SheetNames[0];
                 const worksheet = workbook.Sheets[firstSheetName];
-                const rows = XLSX.utils.sheet_to_json(worksheet, { header: 1 });
+                const rosheet_to_json(worksheet, { header: 1 });
 
-                if (rows.length < 2) return alert('Keepa Excel is empty');
+                if (rows.length < 'Keepa Excel is empty');
 
                 const headers = rows[0].map(h => typeof h === 'string' ? h.toLowerCase() : '');
                 const asinIdx = headers.findIndex(h => h.includes('asin'));
@@ -1488,28 +1477,49 @@
                 const fbaFeeIdx = headers.findIndex(h => h.includes('fba pick&pack fee') || h.includes('fee'));
                 const catIdx = headers.findIndex(h => h === 'categories: root');
                 const brandIdx = headers.findIndex(h => h === 'brand');
-                const refFeeIdx = headers.findIndex(h => h.includes('referral fee %'));
+                const refFeeIdx = headers.findIndex(h => h.inclee %'));
 
-                const savedMapStr = localStorage.getItem('keepaFastMap');
-                const localMap = savedMapStr ? JSON.parse(savedMapStr) : {};
-                const prepFeeVal = parseFloat(document.getElementById('prepFeeInput').value) || 0.5;
+                const eanIdx = headers.findIndex(h => h.includes('ean') || h.includes('eanlist'));
+                const upcIdx = headers.findIndex(h => h === 'upc' || h.includes('upclist'));
+
+                const savedMapStr = localStorage.gtMap');
+                const localMap = savedMapStr ? JSON.parse(savedMapStr) :     const prepFeeVal = parseFloat(document.getElementById('prepFeeInput').value) || 0.5;
 
                 const profitable = [];
                 const problematic = [];
+                // To track which UPCs we actually found
+       UpcsMap = {};
 
                 for (let i = 1; i < rows.length; i++) {
                     const r = rows[i];
                     const asin = r[asinIdx];
-                    if (!asin || !localMap[asin]) continue; // skip if not matching our list
+                    if (!asin) continue;
 
-                    const orig = localMap[asin];
+                    let orig = localMap[asin];
+
+                    // If not found by ASIN, let's try Keepa's EAN/UPC columns
+                    if (!orig) {
+                        const cellEan = r[eanIdx] ? String(r[eanIdx]) : '';
+                    r[upcIdx] ? String(r[upcIdx]) : '';
+                        const combinedList = [...cellEan.split(','), ...cellUpc.split(',')].map(s => s.trim().replace(/^0+/, ''));
+                        
+                        for (const possibleId of combinedList) {
+                       && localMap[possibleId]) {
+                                orig = localMap[possibleId];
+                                break;
+                            }
+                        }
+                    }
+
+               nue; // skip if not matching our list
+                    
+                    foundUpcsMap[orig.UPC] = true;
                     const bbRaw = parseFloat(String(r[bbIdx] || '').replace(/[^0-9.]/g, ''));
-                    const amzRaw = parseFloat(String(r[amzIdx] || '').replace(/[^0-9.]/g, ''));
-                    let price = !isNaN(bbRaw) && bbRaw > 0 ? bbRaw : amzRaw;
+                    const amzRaw = parseFloat(String(r[amzIdx] || '').replace(/                 let price = !isNaN(bbRaw) && bbRaw > 0 ? bbRaw : amzRaw;
                     let strategy = !isNaN(bbRaw) && bbRaw > 0 ? 'Match BB FBA' : (amzRaw > 0 ? 'Match BB (Amazon)' : 'OOS / No Price');
 
                     if (isNaN(price) || price <= 0) {
-                        problematic.push({ UPC: orig.UPC, ItemNumber: orig.ItemNumber, Cost: orig.Cost, Description: orig.Description, Problem: 'No Price in Keepa' });
+                        problematic.push({ UPC: orig.UPC, ItemNuber: orig.ItemNumber, Cost: orig.Cost, Description: orig.Description, Problem: 'No Price in Keepa' });
                         continue;
                     }
 
@@ -1517,20 +1527,20 @@
                     let fbaFee = parseFloat(String(r[fbaFeeIdx] || '').replace(/[^0-9.]/g, '')) || (price * 0.15);
 
                     // Total Amz Fee
-                    const totalAmzFee = fbaFee + (price * (refFeePct / 100));
+                   const totalAmzFee = fbaFee + (price * (refFeePct / 100));
                     const netProfit = price - orig.Cost - totalAmzFee - prepFeeVal;
-                    const roi = orig.Cost > 0 ? (netProfit / orig.Cost) * 100 : 0;
+                    .Cost > 0 ? (netProfit / orig.Cost) * 100 : 0;
 
                     profitable.push({
                         UPC: orig.UPC, ItemNumber: orig.ItemNumber, Description: orig.Description,
-                        Cost: orig.Cost, EffectiveCost: orig.Cost, VarCount: 1,
-                        ASIN: asin, ParentASIN: null, Title: r[headers.findIndex(h => h === 'title')] || 'N/A',
+        Cost: orig.Cost, EffectiveCost: orig.Cost, VarCount: 1,
+                         ASIN: asin, Parente: r[headers.findIndex(h => h === 'title')] || 'N/A',
                         Brand: r[brandIdx] || 'N/A', Category: r[catIdx] || 'N/A',
                         BSR: r[bsrIdx] || -1, BSRDrop: r[dropIdx] > 0 ? '✅ Good' : '🛑 Slow',
-                        KeepaRating: r[ratIdx] || 'N/A', KeepaReviews: r[revIdx] || 'N/A',
-                        KeepaDrops: r[dropIdx] || 'N/A', KeepaAvg30: price,
+                         KeepaRating: r[ratIdx] || 'N/A', KeepaReviews: r[revIdx] || 'N/A',
+                        KeepaDrops: r[dropIdx] || 'N/A', Keep aA vg30: price,
                         BuyBoxPrice: price, Strategy: strategy, CalcPrice: price,
-                        OffersCount: r[offersIdx] || 0, NetProfit: netProfit, ROI: roi,
+                          OffersCount: r[offersIdx]: netProfit, ROI: roi,
                         BrandRisk: 'Clear'
                     });
                 }
@@ -1541,6 +1551,20 @@
 
                 // Add sorting logic back
                 profitable.sort((a, b) => b.ROI - a.ROI);
+
+                // Add any unfound items to problematic list
+                Object.values(localMap).forEach(mapped => {
+                    // Because localMap has multiple keys pointing to the same object (asin, upc, etc)
+                    // We check if this specific UPC was tracked as "found"
+                    if (mapped.UPC && !foundUpcsMap[mapped.UPC]) {
+                        // Prevent duplicates
+                        if (!problematic.find(p => p.UPC === mapped.UPC && p.Problem === 'Not found in Keepa')) {
+                             problematic.push({
+                                 UPC: mapped.UPC, ItemNumber: mapped.ItemNumber, Cost: mapped.Cost, Description: mapped.Description, Problem: 'Not found in Keepa'
+                             });
+                        }
+                    }
+                });
 
                 if (typeof renderTable === 'function') renderTable(profitable);
                 // Also trigger error table
@@ -2060,7 +2084,7 @@
         window.toggleStrategyDropdown = function (event) {
             if (event) event.stopPropagation();
             const dropdown = document.getElementById('strategy-dropdown');
-            dropdown.classList.toggle('hidden');
+        drolassList.toggle('hidden');
         };
 
         document.addEventListener('click', function (event) {
