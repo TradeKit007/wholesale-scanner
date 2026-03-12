@@ -518,11 +518,11 @@ async function getKeepaDataBatch(asins) {
                     const refillInMs = res.data.refillIn || 60000;
                     const tokensLeft = res.data.tokensLeft ?? 'unknown';
 
-                    if (refillInMs > 30000 || (typeof tokensLeft === 'number' && tokensLeft < -10)) {
+                    if (refillInMs > 120000) {
                         console.warn(`[Keepa Batch] ⛔ API Limit (${tokensLeft} tokens). Refill takes ${(refillInMs / 1000).toFixed(1)}s. Too long to wait! Skipping Keepa and falling back to Amazon SP API.`);
                         break; // Exit Keepa immediately, use SP API fallback for all remaining items
                     } else {
-                        console.warn(`[Keepa Batch] ⛔ Rate limit hit. Waiting ${(refillInMs / 1000).toFixed(1)}s for tokens to refill...`);
+                        console.warn(`[Keepa Batch] ⛔ Rate limit hit (${tokensLeft} tokens). Waiting ${(refillInMs / 1000).toFixed(1)}s for tokens to refill...`);
                         await sleep(refillInMs + 1000); // Wait until refill + 1s buffer
                         i -= KEEPA_CHUNK; // Retry same chunk
                     }
