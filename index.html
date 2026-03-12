@@ -1018,6 +1018,7 @@
             colMappers.innerHTML = '';
             const ROLES = [
                 { value: 'ignore', label: '🚫 Ignore' },
+                { value: 'asin', label: '📦 ASIN' },
                 { value: 'upc', label: '🔢 UPC / Barcode' },
                 { value: 'cost', label: '💰 Cost / Unit Price' },
                 { value: 'caseprice', label: '📦 $ / Case Price' },
@@ -1257,6 +1258,7 @@
                 const samples = rows.slice(0, 5).map(r => String(r[ci] || '').toLowerCase().trim());
                 const h = samples[0] || '';
                 if (/upc|barcode|ean|gtin/.test(h)) return 'upc';
+                if (/asin/.test(h)) return 'asin';
                 if (/cost|price/.test(h)) return 'cost';
                 if (/item|sku|part|model/.test(h)) return 'itemnum';
                 if (/brand/.test(h)) return 'brand';
@@ -1304,9 +1306,10 @@
             const mapping = Array.from(selects).map(s => ({ col: parseInt(s.dataset.col), role: s.value }));
             const errors = [];
 
-            const needUpc = !mapping.some(m => m.role === 'upc');
+            const hasIdentifier = mapping.some(m => m.role === 'upc' || m.role === 'asin');
+            const needUpc = !hasIdentifier;
             const needCost = !mapping.some(m => m.role === 'cost' || m.role === 'caseprice');
-            if (needUpc) errors.push('Потрібна хоча б одна колонка UPC / Barcode');
+            if (needUpc) errors.push('Потрібна хоча б одна колонка UPC / Barcode або ASIN');
             if (needCost) errors.push('Потрібна хоча б одна колонка Cost або $ / Case Price');
 
             const errBox = document.getElementById('mappingErrors');
@@ -1317,6 +1320,7 @@
             }
             errBox.classList.add('hidden');
 
+            const asinCol = mapping.find(m => m.role === 'asin')?.col ?? -1;
             const upcCol = mapping.find(m => m.role === 'upc')?.col ?? -1;
             const costCol = mapping.find(m => m.role === 'cost')?.col ?? -1;
             const casepriceCol = mapping.find(m => m.role === 'caseprice')?.col ?? -1;
@@ -1331,10 +1335,11 @@
                 const rows = _excelRows;
                 for (const row of rows) {
                     if (!row || !Array.isArray(row)) continue;
-                    const rawDigits = String(row[upcCol] ?? '').replace(/\D/g, '');
-                    const normUpc = normalizeUpc(rawDigits); // restore leading zeros Excel drops
-                    // accept 7-14 digits pre-normalization (7→8, 11→12 after normalize)
-                    if (!normUpc || !/^\d{8,14}$/.test(normUpc)) continue;
+                    const rawDigits = upcCol >= 0 ? String(row[upcCol] ?? '').replace(/\D/g, '') : '';
+                    const normUpc = rawDigits ? normalizeUpc(rawDigits) : '';
+                    const asinVal = asinCol >= 0 ? String(row[asinCol] ?? '').trim().toUpperCase() : '';
+                    
+                    if (!asinVal && (!normUpc || !/^\d{8,14}$/.test(normUpc))) continue;
 
                     let cost = NaN;
                     if (costCol >= 0) cost = parseCost(row[costCol]);
@@ -1349,9 +1354,11 @@
 
                     const itemNum = itemCol >= 0 ? String(row[itemCol] ?? '').trim() : '';
                     const descText = descCol >= 0 ? String(row[descCol] ?? '').trim() : '';
+                    
                     pendingItems.push({
                         itemNumber: itemNum,
-                        upc: normUpc,
+                        upc: normUpc || asinVal, // fallback upc to asin just in case
+                        asin: asinVal,
                         cost: Math.round(cost * 100) / 100,
                         description: descText
                     });
@@ -1370,11 +1377,12 @@
                 }
                 dataRows.forEach(row => {
                     const rawUpc = upcCol >= 0 ? String(row[upcCol] || '').trim() : '';
+                    const rawAsin = asinCol >= 0 ? String(row[asinCol] || '').trim().toUpperCase() : '';
                     const rawCost = costCol >= 0 ? String(row[costCol] || '').trim() : '';
                     const rawItem = itemCol >= 0 ? String(row[itemCol] || '').trim() : '';
                     const rawDesc = descCol >= 0 ? String(row[descCol] || '').trim() : '';
-                    if (!rawUpc && !rawCost) return;
-                    pendingItems.push({ itemNumber: rawItem, upc: rawUpc, cost: parseCost(rawCost) || 0, description: rawDesc });
+                    if (!rawUpc && !rawAsin && !rawCost) return;
+                    pendingItems.push({ itemNumber: rawItem, upc: rawUpc || rawAsin, asin: rawAsin, cost: parseCost(rawCost) || 0, description: rawDesc });
                 });
                 document.getElementById('colMappingOverlay').classList.remove('pdf-modal-open');
                 statusText.innerText = 'Loaded ' + pendingItems.length + ' items from PDF. Ready to process!';

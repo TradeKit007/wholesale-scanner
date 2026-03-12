@@ -746,17 +746,37 @@ async function processBatch(items, prepFee = 0.5, customBlacklist = [], mode = '
     const profitable = [];
     const problematic = [];
 
-    // ── Validate & Normalize UPCs ──
+    // ── Validate & Normalize UPCs / ASINs ──
     const validItems = [];
+    let initialAsinMap = {};
+
     for (const item of items) {
-        const upc = normalizeUpc(item.upc); // restores leading zeros lost in Excel
-        const cost = Number(item.cost) || 0;
-        const rowBase = { UPC: upc, ItemNumber: item.itemNumber || '', Cost: cost, Description: item.description || '' };
-        if (!MIN_VALID_UPC_LENGTHS.includes(upc.length)) {
-            rowBase.Problem = 'Invalid UPC length (' + upc.length + ' digits: ' + upc + ')';
-            problematic.push(rowBase);
+        let identifier = '';
+        let valid = false;
+
+        const rowBase = { UPC: item.upc || item.asin || '', ItemNumber: item.itemNumber || '', Cost: Number(item.cost) || 0, Description: item.description || '' };
+
+        if (item.asin) {
+            // Already an ASIN!
+            identifier = item.asin;
+            valid = true;
+            initialAsinMap[identifier] = [{
+                asin: item.asin, title: item.description || 'Pre-mapped ASIN', brand: 'Unknown',
+                main_bsr: null, category: 'Unknown', bsrDrop: '⚪ N/A', parentAsin: null
+            }];
         } else {
-            validItems.push({ ...item, _cleanUpc: upc });
+            // It's a UPC
+            identifier = normalizeUpc(item.upc);
+            if (MIN_VALID_UPC_LENGTHS.includes(identifier.length)) {
+                valid = true;
+            } else {
+                rowBase.Problem = 'Invalid UPC length (' + identifier.length + ' digits: ' + identifier + ')';
+                problematic.push(rowBase);
+            }
+        }
+
+        if (valid) {
+            validItems.push({ ...item, _cleanUpc: identifier });
         }
     }
 
@@ -765,10 +785,17 @@ async function processBatch(items, prepFee = 0.5, customBlacklist = [], mode = '
     // ════════════════════════════════════════════
     //  PHASE 1 — Batch UPC → ASIN  (20 per call)
     // ════════════════════════════════════════════
-    const upcs = validItems.map(i => i._cleanUpc);
-    console.log(`[Phase 1] Batch UPC→ASIN lookup for ${upcs.length} UPCs...`);
-    const asinMap = await getAsinBatch(upcs, token);
-    console.log(`[Phase 1] ✅ Resolved ${Object.keys(asinMap).length}/${upcs.length} UPCs in ${((Date.now() - t0) / 1000).toFixed(1)}s`);
+    const upcs = validItems.map(i => i._cleanUpc).filter(id => !initialAsinMap[id]);
+    const asinMap = { ...initialAsinMap };
+
+    if (upcs.length > 0) {
+        console.log(`[Phase 1] Batch UPC→ASIN lookup for ${upcs.length} UPCs...`);
+        const spMap = await getAsinBatch(upcs, token);
+        Object.assign(asinMap, spMap);
+        console.log(`[Phase 1] ✅ Resolved ${Object.keys(spMap).length}/${upcs.length} UPCs in ${((Date.now() - t0) / 1000).toFixed(1)}s`);
+    } else {
+        console.log(`[Phase 1] All ${validItems.length} items already had ASINs provided. Skipping SP API catalog search.`);
+    }
 
     // ════════════════════════════════════════════
     //  PHASE 1.5 — Individual retry for any UPCs
@@ -776,28 +803,30 @@ async function processBatch(items, prepFee = 0.5, customBlacklist = [], mode = '
     //  If a 20-UPC batch got a 429, those items
     //  get a second chance via individual 1-by-1 calls.
     // ════════════════════════════════════════════
-    const missedUpcs = validItems
-        .map(i => i._cleanUpc)
-        .filter(upc => !asinMap[upc]);
+    if (upcs.length > 0) {
+        const missedUpcs = validItems
+            .map(i => i._cleanUpc)
+            .filter(upc => !asinMap[upc] && upcs.includes(upc));
 
-    if (missedUpcs.length > 0) {
-        console.log(`[Phase 1.5] ${missedUpcs.length} UPCs missed in batch → retrying in groups of 3...`);
-        // Retry in small batches of 3 (much faster than one-by-one, still safe rate-limit-wise)
-        const RETRY_CHUNK = 3;
-        for (let r = 0; r < missedUpcs.length; r += RETRY_CHUNK) {
-            const chunk = missedUpcs.slice(r, r + RETRY_CHUNK);
-            await sleep(400); // 400ms between retry-chunks ≈ 1 req/s, well under SP API limit
-            const retryResult = await getAsinBatch(chunk, token);
-            for (const upc of chunk) {
-                if (retryResult[upc]) {
-                    asinMap[upc] = retryResult[upc];
-                    console.log(`[Phase 1.5]  ✅ Found: ${upc} → ${retryResult[upc].map(d => d.asin).join(', ')}`);
-                } else {
-                    console.log(`[Phase 1.5]  ❌ Not in catalog: ${upc}`);
+        if (missedUpcs.length > 0) {
+            console.log(`[Phase 1.5] ${missedUpcs.length} UPCs missed in batch → retrying in groups of 3...`);
+            // Retry in small batches of 3 (much faster than one-by-one, still safe rate-limit-wise)
+            const RETRY_CHUNK = 3;
+            for (let r = 0; r < missedUpcs.length; r += RETRY_CHUNK) {
+                const chunk = missedUpcs.slice(r, r + RETRY_CHUNK);
+                await sleep(400); // 400ms between retry-chunks ≈ 1 req/s, well under SP API limit
+                const retryResult = await getAsinBatch(chunk, token);
+                for (const upc of chunk) {
+                    if (retryResult[upc]) {
+                        asinMap[upc] = retryResult[upc];
+                        console.log(`[Phase 1.5]  ✅ Found: ${upc} → ${retryResult[upc].map(d => d.asin).join(', ')}`);
+                    } else {
+                        console.log(`[Phase 1.5]  ❌ Not in catalog: ${upc}`);
+                    }
                 }
             }
+            console.log(`[Phase 1.5] Done. Resolved: ${Object.keys(asinMap).length}/${upcs.length} scanned.`);
         }
-        console.log(`[Phase 1.5] Done. Resolved: ${Object.keys(asinMap).length}/${upcs.length}`);
     }
 
     // Separate items still not found after retry
@@ -822,7 +851,7 @@ async function processBatch(items, prepFee = 0.5, customBlacklist = [], mode = '
             const asm = asinMap[item._cleanUpc] || [];
             for (const am of asm) {
                 asinsExport.push({
-                    UPC: item._cleanUpc,
+                    UPC: item.upc || item._cleanUpc,
                     Cost: item.cost,
                     ItemNumber: item.itemNumber || '',
                     Description: item.description || '',
