@@ -922,11 +922,16 @@
 
         // Normalize UPC — Excel drops leading zeros (stores barcodes as numbers).
         // e.g. "086486024761" (12-digit) → Excel → 86486024761 (11-digit number)
-        // Fix: pad 11→12 and 7→8 with leading zero.
+        // Fix: pad 1-7 digits to 8 (UPC-E), and 9-11 digits to 12 (UPC-A).
         function normalizeUpc(raw) {
             let digits = String(raw || '').replace(/\D/g, '');
-            if (digits.length === 11) digits = '0' + digits; // UPC-A with dropped leading 0
-            if (digits.length === 7) digits = '0' + digits; // UPC-E / EAN-8 with dropped leading 0
+            if (!digits) return '';
+
+            if (digits.length > 0 && digits.length <= 8) {
+                return digits.padStart(8, '0');
+            } else if (digits.length > 8 && digits.length < 12) {
+                return digits.padStart(12, '0');
+            }
             return digits;
         }
 
