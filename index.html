@@ -1484,8 +1484,24 @@
                     const eanIdx = headers.findIndex(h => h.includes('ean') || h.includes('eanlist'));
                     const upcIdx = headers.findIndex(h => h === 'upc' || h.includes('upclist'));
 
-                    const savedMapStr = localStorage.getItem('keepaFastMap');
-                    const localMap = savedMapStr ? JSON.parse(savedMapStr) : {};
+                    // Dynamically build map from pendingItems so it always works even if they didn't click Export!
+                    const localMap = {};
+                    pendingItems.forEach(p => {
+                        const savedData = {
+                            UPC: p.upc || '', Cost: p.cost, ItemNumber: p.itemNumber || '', Description: p.description || ''
+                        };
+                        if (p.asin) localMap[p.asin.toUpperCase()] = savedData;
+                        if (p.upc) {
+                            localMap[p.upc.replace(/^0+/, '')] = savedData;
+                            localMap[p.upc] = savedData;
+                        }
+                    });
+
+                    // Check if localMap is completely empty (no valid items mapped)
+                    if (Object.keys(localMap).length === 0) {
+                        throw new Error("No products mapped. Did you upload the initial Avery file first?");
+                    }
+
                     const prepFeeVal = parseFloat(document.getElementById('prepFeeInput').value) || 0.5;
 
                     const profitable = [];
@@ -1536,8 +1552,8 @@
                         profitable.push({
                             UPC: orig.UPC, ItemNumber: orig.ItemNumber, Description: orig.Description,
                             Cost: orig.Cost, EffectiveCost: orig.Cost, VarCount: 1,
-                            ASIN: asin, ParentASIN: null, Title: r[headers.findIndex(h => h === 'title')] || 'N/A',
-                            Brand: r[brandIdx] || 'N/A', Category: r[catIdx] || 'N/A',
+                            ASIN: asin, ParentASIN: null, Title: String(r[headers.findIndex(h => h === 'title')] || 'N/A'),
+                            Brand: String(r[brandIdx] || 'N/A'), Category: String(r[catIdx] || 'N/A'),
                             BSR: r[bsrIdx] || -1, BSRDrop: r[dropIdx] > 0 ? '✅ Good' : '🛑 Slow',
                             KeepaRating: r[ratIdx] || 'N/A', KeepaReviews: r[revIdx] || 'N/A',
                             KeepaDrops: r[dropIdx] || 'N/A', KeepaAvg30: price,
