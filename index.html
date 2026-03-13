@@ -1630,6 +1630,27 @@
 
                         let actualSet = pkgQtyVal > 1 ? pkgQtyVal : titleSetQty;
 
+                        // NEW HEURISTIC: Mathematical Pack Size Guesser
+                        // If exact number wasn't found but ROI > 200% and it mentions a multipack
+                        if (actualSet === 1 && roi > 200) {
+                            const hasSetWord = /\b(pack|set|box|case|bundle|dz|dozen|pk|ct|count|pcs|pieces|pks|pairs)\b/i.test(fullSearchStr);
+                            if (hasSetWord) {
+                                let guess = Math.round((price - totalAmzFee - prepFeeVal) / (orig.Cost * 2));
+                                if (guess > 1) {
+                                    const stdSizes = [2, 3, 4, 5, 6, 8, 10, 12, 18, 20, 24, 30, 36, 40, 48, 50, 60, 72, 96, 100, 120, 144, 150, 200, 250, 500, 1000];
+                                    let closest = guess;
+                                    let minDiff = guess;
+                                    for (let s of stdSizes) {
+                                        if (Math.abs(guess - s) < minDiff) {
+                                            minDiff = Math.abs(guess - s);
+                                            closest = s;
+                                        }
+                                    }
+                                    actualSet = (minDiff / guess < 0.3) ? closest : guess;
+                                }
+                            }
+                        }
+
                         // Recalculate if it's a multipack OR (ROI > 150% and detected a set)
                         if (actualSet > 1 && (pkgQtyVal > 1 || roi > 150)) {
                             varCount = actualSet;
