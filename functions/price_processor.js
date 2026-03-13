@@ -103,27 +103,31 @@ function detectPackMultiplier(title) {
     if (!title) return 1;
     const t = title;
     const patterns = [
-        [/(\d+)\s*[-–]\s*[Pp]ack\b/, null],           // "3-Pack", "6-Pack"
-        [/(\d+)\s+[Pp]ack\b/, null],                  // "3 Pack"
-        [/[Pp]ack\s+of\s+(\d+)/, null],               // "Pack of 3" / "Pack of 3 Boxes"
-        [/[Ss]et\s+of\s+(\d+)/, null],                // "Set of 3"
-        [/[Bb]undle\s+of\s+(\d+)/, null],             // "Bundle of 3"
-        [/[Cc]ase\s+of\s+(\d+)/, null],               // "Case of 6"
-        [/[Bb]ox\s+of\s+(\d+)/, null],                // "Box of 4"
-        [/[Bb]ag\s+of\s+(\d+)/, null],                // "Bag of 12"
-        [/[Ll]ot\s+of\s+(\d+)/, null],                // "Lot of 3"
-        [/(\d+)\s+[Pp]er\s+[Cc]ase/, null],           // "3 Per Case" ← key fix
-        [/(\d+)\s+[Pp]er\s+[Pp]ack/, null],           // "3 Per Pack"
-        [/(\d+)\s*[-–]?\s*[Cc]ount\b/, null],         // "3-Count", "3 Count"
-        [/\((\d+)\s*[Cc]ount\)/, null],               // "(3 Count)"
-        [/(\d+)\s*[-–]?\s*[Cc]t\b/, null],            // "3ct", "3-ct"
-        [/(\d+)\s*[-–]?\s*[Pp]iece[s]?\b/, null],    // "3 Pieces", "3-Piece"
-        [/(\d+)\s*[Pp]k\b/i, null],                   // "3pk"
-        [/\((\d+)\s*[Pp]ack\)/, null],                // "(3 Pack)"
-        [/(\d+)\s+[Ii]tems?\b/, null],                // "3 Items"
-        [/[Tt]win\s*[Pp]ack/, 2],                     // "Twin Pack" → 2
-        [/[Tt]riple\s*[Pp]ack/, 3],                   // "Triple Pack" → 3
-        [/[Qq]uad\s*[Pp]ack/, 4],                     // "Quad Pack" → 4
+        [/(\d+)\s*[-–]\s*pack\b/i, null],           // "3-Pack"
+        [/(\d+)\s+pack\b/i, null],                  // "3 Pack"
+        [/pack\s+of\s+(\d+)/i, null],               // "Pack of 3"
+        [/set\s+of\s+(\d+)/i, null],                // "Set of 3"
+        [/bundle\s+of\s+(\d+)/i, null],             // "Bundle of 3"
+        [/case\s+of\s+(\d+)/i, null],               // "Case of 6"
+        [/box\s+of\s+(\d+)/i, null],                // "Box of 4"
+        [/bag\s+of\s+(\d+)/i, null],                // "Bag of 12"
+        [/lot\s+of\s+(\d+)/i, null],                // "Lot of 3"
+        [/(\d+)\s+per\s+case/i, null],              // "3 Per Case"
+        [/(\d+)\s+per\s+pack/i, null],              // "3 Per Pack"
+        [/(\d+)\s*[-–]?\s*count\b/i, null],         // "3-Count"
+        [/\((\d+)\s*count\)/i, null],               // "(3 Count)"
+        [/(\d+)\s*[-–]?\s*ct\b/i, null],            // "3ct", "3-ct"
+        [/(\d+)\s*[-–]?\s*piece[s]?\b/i, null],     // "3 Pieces"
+        [/(\d+)\s*pk\b/i, null],                   // "3pk"
+        [/\((\d+)\s*pack\)/i, null],                // "(3 Pack)"
+        [/(\d+)\s+items?\b/i, null],                // "3 Items"
+        [/twin\s*pack/i, 2],                     // "Twin Pack" → 2
+        [/triple\s*pack/i, 3],                   // "Triple Pack" → 3
+        [/quad\s*pack/i, 4],                     // "Quad Pack" → 4
+        // NEW PATTERNS
+        [/\[(\d+)\s*sets?\]/i, null],
+        [/(\d+)\/pk/i, null],
+        [/(\d+)\s*[-–]?\s*pairs?/i, null]
     ];
     for (const [rx, fixed] of patterns) {
         const m = t.match(rx);
@@ -132,8 +136,7 @@ function detectPackMultiplier(title) {
             if (n >= 2 && n <= 200) return n;
         }
     }
-    // Pattern: "Noun & Noun Set" — count & before "Set" (e.g. "A & B Set" → 2×)
-    const andSetMatch = t.match(/\w[\w\s,'-]{1,40}\s*(?:&\s*\w[\w\s,'-]{1,30})+\s+Set\b/i);
+    const andSetMatch = t.match(/\w[\w\s,'-]{1,40}\s*(?:&\s*\w[\w\s,'-]{1,30})+\s+set\b/i);
     if (andSetMatch) {
         const count = (andSetMatch[0].match(/&/g) || []).length + 1;
         if (count >= 2) return count;
@@ -495,6 +498,18 @@ function avgPrice30FromCsv(priceCsv) {
     return count > 0 ? (sum / count / 100).toFixed(2) : null;
 }
 
+function avgBsr30FromCsv(bsrCsv) {
+    if (!bsrCsv || bsrCsv.length < 4) return null;
+    const cutoffMs = Date.now() - 30 * 24 * 3600 * 1000;
+    let sum = 0, count = 0;
+    for (let i = 0; i < bsrCsv.length - 1; i += 2) {
+        if (keepaMinutesToMs(bsrCsv[i]) < cutoffMs) continue;
+        const b = bsrCsv[i + 1];
+        if (b > 0) { sum += b; count++; }
+    }
+    return count > 0 ? Math.round(sum / count) : null;
+}
+
 async function getKeepaDataBatch(asins) {
     if (!CONFIG.keepaApiKey || asins.length === 0) return {};
 
@@ -616,6 +631,8 @@ async function getKeepaDataBatch(asins) {
                 }
 
                 let currentOffersCount = product.offersSuccessful || 0;
+                let pkgQty = product.packageQuantity || 1;
+                let avgBsr30 = avgBsr30FromCsv(product.csv?.[3]);
 
                 results[asin] = {
                     rating: rating !== null ? rating.toFixed(1) : 'N/A',
@@ -623,6 +640,7 @@ async function getKeepaDataBatch(asins) {
                     drops30: drops30 !== null ? drops30 : 'N/A',
                     avg30: avg30Price !== null ? avg30Price : 'N/A',
                     packageWeight: product.packageWeight,
+                    pkgQty, avgBsr30,
                     pickAndPackFee, referralFeeDecimal,
                     currentBBPrice, amazonPrice, currentOffersCount,
                 };
@@ -940,19 +958,26 @@ async function processBatch(items, prepFee = 0.5, customBlacklist = [], mode = '
             const keepa = keepaMap[asin] || {};
             const priceData = priceMap[asin] || { error: 'Price not fetched' };
 
-            // Pack/Set Multiplier
-            const packMultiplier = detectPackMultiplier(asinData.title);
+            let packMultiplier = detectPackMultiplier(asinData.title);
+            if (keepa && keepa.pkgQty > 1) {
+                packMultiplier = Math.max(packMultiplier, keepa.pkgQty);
+            }
+
             const effectiveCost = cost * packMultiplier;
 
+            let finalBsr = asinData.main_bsr;
+            if (!finalBsr || finalBsr <= 0) {
+                finalBsr = keepa.avgBsr30 || 'N/A';
+            }
+
             const rowData = {
-                UPC: upc, ItemNumber: item.itemNumber || '',
-                Cost: cost,
+                UPC: upc, ItemNumber: item.itemNumber || '', Cost: cost,
                 Description: item.description || '',
                 EffectiveCost: Number(effectiveCost.toFixed(2)),
                 VarCount: packMultiplier,
                 ASIN: asin, ParentASIN: asinData.parentAsin || null,
                 Title: asinData.title, Brand: asinData.brand || 'N/A',
-                Category: asinData.category, BSR: asinData.main_bsr || 'N',
+                Category: asinData.category, BSR: finalBsr,
                 BSRDrop: asinData.bsrDrop,
                 KeepaRating: keepa.rating ?? 'N/A',
                 KeepaReviews: keepa.reviews ?? 'N/A',
