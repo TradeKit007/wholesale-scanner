@@ -1473,7 +1473,7 @@
                     const bbIdx = headers.findIndex(h => h === 'buy box: current' || h === 'buy box' || (h.includes('buy box') && h.includes('current')));
                     const amzIdx = headers.findIndex(h => h === 'amazon: current' || h === 'amazon' || (h.includes('amazon') && h.includes('current')));
                     const ratIdx = headers.findIndex(h => h === 'rating' || h === 'reviews: rating');
-                    const revIdx = headers.findIndex(h => h === 'review count' || h === 'rating count' || h.includes('review'));
+                    const revIdx = headers.findIndex(h => h === 'review count' || h === 'rating count' || h.startsWith('review count'));
                     const dropIdx = headers.findIndex(h => h.includes('drops last 30') || h.includes('drops last 90') || (h.includes('sales rank') && h.includes('drop')));
                     const offersIdx = headers.findIndex(h => h === 'new offer count: current' || h.includes('offer count') || h.includes('new offer'));
                     const fbaFeeIdx = headers.findIndex(h => h.includes('fba pick&pack fee') || h.includes('fee'));
@@ -1549,13 +1549,54 @@
                         let netProfit = price - orig.Cost - totalAmzFee - prepFeeVal;
                         let roi = orig.Cost > 0 ? (netProfit / orig.Cost) * 100 : 0;
 
+                        // Detect sets for high ROIs
+                        let titleRaw = String(r[headers.findIndex(h => h === 'title' || h.includes('title'))] || 'N/A');
+
+                        function detectSetQty(title) {
+                            if (!title) return 1;
+                            const numPatterns = [
+                                [/(\d+)\s*-\s*[Pp]ack/, null], [/(\d+)\s*[Pp]ack\b/, null], [/[Pp]ack\s+of\s+(\d+)/, null],
+                                [/[Ss]et\s+of\s+(\d+)/, null], [/[Cc]ase\s+of\s+(\d+)/, null], [/[Bb]ox\s+of\s+(\d+)/, null],
+                                [/[Bb]ag\s+of\s+(\d+)/, null], [/[Ll]ot\s+of\s+(\d+)/, null],
+                                [/(\d+)\s+[Pp]er\s+[Cc]ase/, null], [/(\d+)\s+[Pp]er\s+[Pp]ack/, null],
+                                [/(\d+)\s*-?\s*[Cc]ount\b/, null], [/\((\d+)\s*[Cc]ount\)/, null],
+                                [/(\d+)\s*-?\s*[Cc]t\.?\b/, null], [/(\d+)\s*-?\s*[Pp]iece/, null],
+                                [/(\d+)\s*[Pp]k\b/i, null], [/\((\d+)\s*[Pp]ack\)/, null],
+                                [/[Bb]undle\s+of\s+(\d+)/, null], [/(\d+)\s*[Ii]tems?\b/, null],
+                                [/[Tt]win\s*[Pp]ack/, 2], [/[Tt]riple\s*[Pp]ack/, 3], [/[Qq]uad\s*[Pp]ack/, 4]
+                            ];
+                            for (const [rx, fixed] of numPatterns) {
+                                const m = title.match(rx);
+                                if (m) return fixed !== null ? fixed : (parseInt(m[1]) || 1);
+                            }
+                            const andSetMatch = title.match(/\w[\w\s,'-]{1,40}\s*(?:&\s*\w[\w\s,'-]{1,30})+\s+Set\b/i);
+                            if (andSetMatch) {
+                                const ampersandCount = (andSetMatch[0].match(/&/g) || []).length;
+                                if (ampersandCount >= 1) return ampersandCount + 1;
+                            }
+                            return 1;
+                        }
+
+                        let effCost = orig.Cost;
+                        let varCount = 1;
+
+                        if (roi > 200) {
+                            const foundSet = detectSetQty(titleRaw);
+                            if (foundSet > 1) {
+                                varCount = foundSet;
+                                effCost = orig.Cost * varCount;
+                                netProfit = price - effCost - totalAmzFee - prepFeeVal;
+                                roi = effCost > 0 ? (netProfit / effCost) * 100 : 0;
+                            }
+                        }
+
                         netProfit = Number(netProfit.toFixed(2));
                         roi = Number(roi.toFixed(2));
 
                         profitable.push({
                             UPC: orig.UPC, ItemNumber: orig.ItemNumber, Description: orig.Description,
-                            Cost: orig.Cost, EffectiveCost: orig.Cost, VarCount: 1,
-                            ASIN: asin, ParentASIN: null, Title: String(r[headers.findIndex(h => h === 'title' || h.includes('title'))] || 'N/A'),
+                            Cost: orig.Cost, EffectiveCost: effCost, VarCount: varCount,
+                            ASIN: asin, ParentASIN: null, Title: titleRaw,
                             Brand: String(r[brandIdx] || 'N/A'), Category: String(r[catIdx] || 'N/A'),
                             BSR: parseInt(String(r[bsrIdx] || '').replace(/[^\d]/g, '')) || -1, BSRDrop: parseInt(String(r[dropIdx] || '0').replace(/[^\d]/g, '')) > 0 ? '✅ Good' : '🛑 Slow',
                             KeepaRating: parseFloat(String(r[ratIdx] || 'N/A').replace(/[^\d.]/g, '')) || 'N/A',
