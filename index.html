@@ -1418,9 +1418,14 @@
                 [/twin\s*pack/i, 2], [/triple\s*pack/i, 3], [/quad\s*pack/i, 4],
                 [/\[(\d+)\s*sets?\]/i, null], [/(\d+)\/PK/i, null], [/(\d+)\s*-?\s*pairs?/i, null]
             ];
-            for (const [rx, fixed] of numPatterns) {
+            for (let i = 0; i < numPatterns.length; i++) {
+                const rx = numPatterns[i][0];
+                const fixed = numPatterns[i][1];
                 const m = title.match(rx);
-                if (m) return fixed !== null ? fixed : (parseInt(m[1]) || 1);
+                if (m) {
+                    let val = fixed !== null ? fixed : (parseInt(m[1]) || 1);
+                    return val;
+                }
             }
             return 1;
         };
@@ -1576,19 +1581,22 @@
 
                         let effCost = orig.Cost;
                         let varCount = 1;
+                        let debugSet = 1;
 
-                        if (roi > 150) {
-                            const foundSet = window.detectSetQty(titleRaw);
-                            if (foundSet > 1) {
-                                varCount = foundSet;
-                                effCost = orig.Cost * varCount;
-                                netProfit = price - effCost - totalAmzFee - prepFeeVal;
-                                roi = effCost > 0 ? (netProfit / effCost) * 100 : 0;
-                            }
+                        const foundSet = window.detectSetQty(titleRaw);
+                        debugSet = foundSet;
+
+                        if (roi > 150 && foundSet > 1) {
+                            varCount = foundSet;
+                            effCost = orig.Cost * varCount;
+                            netProfit = price - effCost - totalAmzFee - prepFeeVal;
+                            roi = effCost > 0 ? (netProfit / effCost) * 100 : 0;
                         }
 
                         netProfit = Number(netProfit.toFixed(2));
                         roi = Number(roi.toFixed(2));
+
+                        titleRaw = titleRaw + ` [DEBUG_SET:${debugSet}]`;
 
                         profitable.push({
                             UPC: orig.UPC, ItemNumber: orig.ItemNumber, Description: orig.Description,
