@@ -1469,17 +1469,18 @@
 
                     const headers = rows[0].map(h => typeof h === 'string' ? h.toLowerCase() : '');
                     const asinIdx = headers.findIndex(h => h.includes('asin'));
-                    const bsrIdx = headers.findIndex(h => h === 'sales rank: current');
-                    const bbIdx = headers.findIndex(h => h === 'buy box: current');
-                    const amzIdx = headers.findIndex(h => h === 'amazon: current');
-                    const ratIdx = headers.findIndex(h => h === 'rating');
-                    const revIdx = headers.findIndex(h => h === 'review count');
-                    const dropIdx = headers.findIndex(h => h === 'sales rank: drops last 30 days');
-                    const offersIdx = headers.findIndex(h => h === 'new offer count: current');
+                    const bsrIdx = headers.findIndex(h => h === 'sales rank: current' || (h.includes('sales rank') && h.includes('current')));
+                    const bbIdx = headers.findIndex(h => h === 'buy box: current' || (h.includes('buy box') && h.includes('current')));
+                    const amzIdx = headers.findIndex(h => h === 'amazon: current' || (h.includes('amazon') && h.includes('current')));
+                    // Some Keepa exports use just 'rating', some use 'reviews: rating', CSV might be 'rating'
+                    const ratIdx = headers.findIndex(h => h === 'rating' || h.includes('rating') || h === 'reviews: rating');
+                    const revIdx = headers.findIndex(h => h === 'review count' || h.includes('review count'));
+                    const dropIdx = headers.findIndex(h => h === 'sales rank: drops last 30 days' || h.includes('drops last 30') || h.includes('drops last 90') || (h.includes('sales rank') && h.includes('drop')));
+                    const offersIdx = headers.findIndex(h => h === 'new offer count: current' || h.includes('new offer count') || h.includes('offer count: current'));
                     const fbaFeeIdx = headers.findIndex(h => h.includes('fba pick&pack fee') || h.includes('fee'));
-                    const catIdx = headers.findIndex(h => h === 'categories: root');
-                    const brandIdx = headers.findIndex(h => h === 'brand');
-                    const refFeeIdx = headers.findIndex(h => h.includes('referral fee %'));
+                    const catIdx = headers.findIndex(h => h.includes('categories: root') || h.includes('categories'));
+                    const brandIdx = headers.findIndex(h => h === 'brand' || h.includes('brand'));
+                    const refFeeIdx = headers.findIndex(h => h.includes('referral fee') && h.includes('%'));
 
                     const eanIdx = headers.findIndex(h => h.includes('ean') || h.includes('eanlist'));
                     const upcIdx = headers.findIndex(h => h === 'upc' || h.includes('upclist'));
