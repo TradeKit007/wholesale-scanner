@@ -1505,6 +1505,7 @@
                     const revIdx = headers.findIndex(h => h === 'review count' || h === 'rating count' || h.startsWith('review count'));
                     const dropIdx = headers.findIndex(h => h.includes('drops last 30') || h.includes('drops last 90') || (h.includes('sales rank') && h.includes('drop')));
                     const offersIdx = headers.findIndex(h => h === 'new offer count: current' || h.includes('offer count') || h.includes('new offer'));
+                    const pkgQtyIdx = headers.findIndex(h => h === 'item: package quantity' || h === 'package quantity' || h.includes('package quantity'));
                     const fbaFeeIdx = headers.findIndex(h => h.includes('fba pick&pack fee') || h.includes('fee'));
                     const catIdx = headers.findIndex(h => h.includes('categories: root') || h.includes('categories'));
                     const brandIdx = headers.findIndex(h => h === 'brand' || h.includes('brand'));
@@ -1583,13 +1584,19 @@
 
                         let effCost = orig.Cost;
                         let varCount = 1;
-                        let debugSet = 1;
 
-                        const foundSet = window.detectSetQty(titleRaw);
-                        debugSet = foundSet;
+                        // 1. Check native Keepa Package Quantity First
+                        let pkgQtyVal = pkgQtyIdx > -1 ? parseInt(String(r[pkgQtyIdx]).replace(/\D/g, '')) || 1 : 1;
 
-                        if (roi > 150 && foundSet > 1) {
-                            varCount = foundSet;
+                        // 2. Check title Regex Set Quantity
+                        const titleSetQty = window.detectSetQty(titleRaw);
+
+                        let debugSet = pkgQtyVal > 1 ? pkgQtyVal : titleSetQty;
+                        let actualSet = debugSet;
+
+                        // Recalculate if it's a multipack OR (ROI > 150% and detected a set)
+                        if (actualSet > 1 && (pkgQtyVal > 1 || roi > 150)) {
+                            varCount = actualSet;
                             effCost = orig.Cost * varCount;
                             netProfit = price - effCost - totalAmzFee - prepFeeVal;
                             roi = effCost > 0 ? (netProfit / effCost) * 100 : 0;
