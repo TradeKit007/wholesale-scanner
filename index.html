@@ -1469,14 +1469,13 @@
 
                     const headers = rows[0].map(h => typeof h === 'string' ? h.toLowerCase() : '');
                     const asinIdx = headers.findIndex(h => h.includes('asin'));
-                    const bsrIdx = headers.findIndex(h => h === 'sales rank: current' || (h.includes('sales rank') && h.includes('current')));
-                    const bbIdx = headers.findIndex(h => h === 'buy box: current' || (h.includes('buy box') && h.includes('current')));
-                    const amzIdx = headers.findIndex(h => h === 'amazon: current' || (h.includes('amazon') && h.includes('current')));
-                    // Some Keepa exports use just 'rating', some use 'reviews: rating', CSV might be 'rating'
-                    const ratIdx = headers.findIndex(h => h === 'rating' || h.includes('rating') || h === 'reviews: rating');
-                    const revIdx = headers.findIndex(h => h === 'review count' || h.includes('review count'));
-                    const dropIdx = headers.findIndex(h => h === 'sales rank: drops last 30 days' || h.includes('drops last 30') || h.includes('drops last 90') || (h.includes('sales rank') && h.includes('drop')));
-                    const offersIdx = headers.findIndex(h => h === 'new offer count: current' || h.includes('new offer count') || h.includes('offer count: current'));
+                    const bsrIdx = headers.findIndex(h => h === 'sales rank: current' || h === 'sales rank' || (h.includes('sales rank') && h.includes('current')));
+                    const bbIdx = headers.findIndex(h => h === 'buy box: current' || h === 'buy box' || (h.includes('buy box') && h.includes('current')));
+                    const amzIdx = headers.findIndex(h => h === 'amazon: current' || h === 'amazon' || (h.includes('amazon') && h.includes('current')));
+                    const ratIdx = headers.findIndex(h => h === 'rating' || h === 'reviews: rating');
+                    const revIdx = headers.findIndex(h => h === 'review count' || h === 'rating count' || h.includes('review'));
+                    const dropIdx = headers.findIndex(h => h.includes('drops last 30') || h.includes('drops last 90') || (h.includes('sales rank') && h.includes('drop')));
+                    const offersIdx = headers.findIndex(h => h === 'new offer count: current' || h.includes('offer count') || h.includes('new offer'));
                     const fbaFeeIdx = headers.findIndex(h => h.includes('fba pick&pack fee') || h.includes('fee'));
                     const catIdx = headers.findIndex(h => h.includes('categories: root') || h.includes('categories'));
                     const brandIdx = headers.findIndex(h => h === 'brand' || h.includes('brand'));
@@ -1547,17 +1546,21 @@
 
                         // Total Amz Fee
                         const totalAmzFee = fbaFee + (price * (refFeePct / 100));
-                        const netProfit = price - orig.Cost - totalAmzFee - prepFeeVal;
-                        const roi = orig.Cost > 0 ? (netProfit / orig.Cost) * 100 : 0;
+                        let netProfit = price - orig.Cost - totalAmzFee - prepFeeVal;
+                        let roi = orig.Cost > 0 ? (netProfit / orig.Cost) * 100 : 0;
+
+                        netProfit = Number(netProfit.toFixed(2));
+                        roi = Number(roi.toFixed(2));
 
                         profitable.push({
                             UPC: orig.UPC, ItemNumber: orig.ItemNumber, Description: orig.Description,
                             Cost: orig.Cost, EffectiveCost: orig.Cost, VarCount: 1,
-                            ASIN: asin, ParentASIN: null, Title: String(r[headers.findIndex(h => h === 'title')] || 'N/A'),
+                            ASIN: asin, ParentASIN: null, Title: String(r[headers.findIndex(h => h === 'title' || h.includes('title'))] || 'N/A'),
                             Brand: String(r[brandIdx] || 'N/A'), Category: String(r[catIdx] || 'N/A'),
-                            BSR: r[bsrIdx] || -1, BSRDrop: r[dropIdx] > 0 ? '✅ Good' : '🛑 Slow',
-                            KeepaRating: r[ratIdx] || 'N/A', KeepaReviews: r[revIdx] || 'N/A',
-                            KeepaDrops: r[dropIdx] || 'N/A', KeepaAvg30: price,
+                            BSR: parseInt(String(r[bsrIdx] || '').replace(/[^\d]/g, '')) || -1, BSRDrop: parseInt(String(r[dropIdx] || '0').replace(/[^\d]/g, '')) > 0 ? '✅ Good' : '🛑 Slow',
+                            KeepaRating: parseFloat(String(r[ratIdx] || 'N/A').replace(/[^\d.]/g, '')) || 'N/A',
+                            KeepaReviews: parseInt(String(r[revIdx] || 'N/A').replace(/[^\d]/g, '')) || 'N/A',
+                            KeepaDrops: parseInt(String(r[dropIdx] || 'N/A').replace(/[^\d]/g, '')) || 'N/A', KeepaAvg30: price,
                             BuyBoxPrice: price, Strategy: strategy, CalcPrice: price,
                             OffersCount: r[offersIdx] || 0, NetProfit: netProfit, ROI: roi,
                             BrandRisk: 'Clear'
