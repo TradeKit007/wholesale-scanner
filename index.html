@@ -952,6 +952,7 @@
             const cpKws = ['/ case', '/case', 'case price', '$ / case'];
             const csKws = ['case size', 'case qty', 'qty/case', 'pack size', 'pack qty'];
             const itemKws = ['item number', 'item#', 'item no', 'sku', 'part number', 'model'];
+            const descKws = ['description', 'desc', 'product name', 'item name', 'title'];
 
             const colGuess = new Array(maxCols).fill('ignore');
             // Scan first 15 rows to find header-like row
@@ -967,6 +968,7 @@
                     else if (cpKws.some(k => cv.includes(k))) { tmp[c] = 'caseprice'; rowHasCost = true; }
                     else if (csKws.some(k => cv.includes(k))) { tmp[c] = 'casesize'; }
                     else if (itemKws.some(k => cv.includes(k))) tmp[c] = 'itemnum';
+                    else if (descKws.some(k => cv.includes(k))) tmp[c] = 'description';
                 }
                 if (rowHasUpc && rowHasCost) { // found the header row
                     for (let c = 0; c < maxCols; c++) colGuess[c] = tmp[c];
@@ -1024,6 +1026,7 @@
                 { value: 'caseprice', label: '📦 $ / Case Price' },
                 { value: 'casesize', label: '🔢 Case Size / Qty' },
                 { value: 'itemnum', label: '🏷️ Item# / SKU' },
+                { value: 'description', label: '📝 Description / Title' },
             ];
 
             for (let c = 0; c < maxCols; c++) {
