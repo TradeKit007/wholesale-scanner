@@ -1450,8 +1450,15 @@
                 let localMap = {};
 
                 pendingItems.forEach(p => {
-                    const id = p.asin || p.upc;
+                    let id = p.asin || p.upc;
                     if (id) {
+                        // Workaround for Keepa Bug: Keepa often misinterprets 12-digit UPCs starting with 0 
+                        // as a 10-digit ISBN-10 (dropping the last 2 digits). 
+                        // Padding to 13-digit EAN forces Keepa to read the full barcode.
+                        if (!p.asin && id.length === 12 && id.startsWith('0')) {
+                            id = '0' + id;
+                        }
+
                         allIds.push(id);
 
                         const savedData = {
@@ -1462,6 +1469,7 @@
                         if (p.upc) {
                             localMap[p.upc.replace(/^0+/, '')] = savedData;
                             localMap[p.upc] = savedData;
+                            localMap[id] = savedData; // ensure modified 13-digit ID maps back
                         }
                     }
                 });
