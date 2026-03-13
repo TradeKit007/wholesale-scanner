@@ -1529,21 +1529,7 @@
                         </div>`;
                         document.getElementById('profTable').parentElement.insertAdjacentHTML('beforebegin', warningHTML);
                     }
-                    const asinIdx = headers.findIndex(h => h.includes('asin'));
-                    const bsrIdx = headers.findIndex(h => h === 'sales rank: current' || h === 'sales rank' || (h.includes('sales rank') && h.includes('current')));
-                    const bsr30Idx = headers.findIndex(h => h === 'sales rank: 30 days avg.' || h.includes('30 days avg') || (h.includes('sales rank') && h.includes('30')));
-                    const bsr90Idx = headers.findIndex(h => h === 'sales rank: 90 days avg.' || h.includes('90 days avg') || (h.includes('sales rank') && h.includes('90')));
-                    const bbIdx = headers.findIndex(h => h === 'buy box: current' || h === 'buy box' || (h.includes('buy box') && h.includes('current')));
-                    const amzIdx = headers.findIndex(h => h === 'amazon: current' || h === 'amazon' || (h.includes('amazon') && h.includes('current')));
-                    const ratIdx = headers.findIndex(h => h === 'rating' || h === 'reviews: rating');
-                    const revIdx = headers.findIndex(h => h === 'review count' || h === 'rating count' || h.startsWith('review count'));
-                    const dropIdx = headers.findIndex(h => h.includes('drops last 30') || h.includes('drops last 90') || (h.includes('sales rank') && h.includes('drop')));
-                    const offersIdx = headers.findIndex(h => h === 'new offer count: current' || h.includes('offer count') || h.includes('new offer'));
-                    const pkgQtyIdx = headers.findIndex(h => h === 'item: package quantity' || h === 'package quantity' || h.includes('package quantity'));
-                    const fbaFeeIdx = headers.findIndex(h => h.includes('fba pick&pack fee') || h.includes('fee'));
-                    const catIdx = headers.findIndex(h => h.includes('categories: root') || h.includes('categories'));
-                    const brandIdx = headers.findIndex(h => h === 'brand' || h.includes('brand'));
-                    const refFeeIdx = headers.findIndex(h => h.includes('referral fee') && h.includes('%'));
+
 
                     const eanIdx = headers.findIndex(h => h.includes('ean') || h.includes('eanlist'));
                     const upcIdx = headers.findIndex(h => h === 'upc' || h.includes('upclist'));
