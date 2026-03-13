@@ -1511,6 +1511,40 @@
                     const brandIdx = headers.findIndex(h => h === 'brand' || h.includes('brand'));
                     const refFeeIdx = headers.findIndex(h => h.includes('referral fee') && h.includes('%'));
 
+                    const missingCols = [];
+                    if (bsr30Idx === -1) missingCols.push("'Sales Rank: 30 days avg.'");
+                    if (pkgQtyIdx === -1) missingCols.push("'Item: Package Quantity'");
+                    if (ratIdx === -1) missingCols.push("'Rating'");
+
+                    const existingWarning = document.getElementById('keepaMissingColsWarning');
+                    if (existingWarning) existingWarning.remove();
+
+                    if (missingCols.length > 0) {
+                        const warningHTML = `<div id="keepaMissingColsWarning" class="bg-yellow-900/40 border border-yellow-700 text-yellow-200 p-3 rounded-lg mb-4 text-sm flex gap-3 items-start">
+                            <div class="text-xl">⚠️</div>
+                            <div>
+                                <strong>Warning!</strong> Your Keepa file is missing important columns: <span class="text-white">${missingCols.join(', ')}</span><br>
+                                <span class="opacity-80">This means BSR will be "N/A" for some items and multi-packs might not be detected properly. Next time, please enable these columns in Keepa Viewer before exporting.</span>
+                            </div>
+                        </div>`;
+                        document.getElementById('profTable').parentElement.insertAdjacentHTML('beforebegin', warningHTML);
+                    }
+                    const asinIdx = headers.findIndex(h => h.includes('asin'));
+                    const bsrIdx = headers.findIndex(h => h === 'sales rank: current' || h === 'sales rank' || (h.includes('sales rank') && h.includes('current')));
+                    const bsr30Idx = headers.findIndex(h => h === 'sales rank: 30 days avg.' || h.includes('30 days avg') || (h.includes('sales rank') && h.includes('30')));
+                    const bsr90Idx = headers.findIndex(h => h === 'sales rank: 90 days avg.' || h.includes('90 days avg') || (h.includes('sales rank') && h.includes('90')));
+                    const bbIdx = headers.findIndex(h => h === 'buy box: current' || h === 'buy box' || (h.includes('buy box') && h.includes('current')));
+                    const amzIdx = headers.findIndex(h => h === 'amazon: current' || h === 'amazon' || (h.includes('amazon') && h.includes('current')));
+                    const ratIdx = headers.findIndex(h => h === 'rating' || h === 'reviews: rating');
+                    const revIdx = headers.findIndex(h => h === 'review count' || h === 'rating count' || h.startsWith('review count'));
+                    const dropIdx = headers.findIndex(h => h.includes('drops last 30') || h.includes('drops last 90') || (h.includes('sales rank') && h.includes('drop')));
+                    const offersIdx = headers.findIndex(h => h === 'new offer count: current' || h.includes('offer count') || h.includes('new offer'));
+                    const pkgQtyIdx = headers.findIndex(h => h === 'item: package quantity' || h === 'package quantity' || h.includes('package quantity'));
+                    const fbaFeeIdx = headers.findIndex(h => h.includes('fba pick&pack fee') || h.includes('fee'));
+                    const catIdx = headers.findIndex(h => h.includes('categories: root') || h.includes('categories'));
+                    const brandIdx = headers.findIndex(h => h === 'brand' || h.includes('brand'));
+                    const refFeeIdx = headers.findIndex(h => h.includes('referral fee') && h.includes('%'));
+
                     const eanIdx = headers.findIndex(h => h.includes('ean') || h.includes('eanlist'));
                     const upcIdx = headers.findIndex(h => h === 'upc' || h.includes('upclist'));
 
@@ -1588,11 +1622,11 @@
                         // 1. Check native Keepa Package Quantity First
                         let pkgQtyVal = pkgQtyIdx > -1 ? parseInt(String(r[pkgQtyIdx]).replace(/\D/g, '')) || 1 : 1;
 
-                        // 2. Check title Regex Set Quantity
-                        const titleSetQty = window.detectSetQty(titleRaw);
+                        // 2. Check title Regex Set Quantity (Now combining Original Description just in case)
+                        const fullSearchStr = (titleRaw + " " + String(orig.Description || "")).toLowerCase();
+                        const titleSetQty = window.detectSetQty(fullSearchStr);
 
-                        let debugSet = pkgQtyVal > 1 ? pkgQtyVal : titleSetQty;
-                        let actualSet = debugSet;
+                        let actualSet = pkgQtyVal > 1 ? pkgQtyVal : titleSetQty;
 
                         // Recalculate if it's a multipack OR (ROI > 150% and detected a set)
                         if (actualSet > 1 && (pkgQtyVal > 1 || roi > 150)) {
@@ -1605,7 +1639,10 @@
                         netProfit = Number(netProfit.toFixed(2));
                         roi = Number(roi.toFixed(2));
 
-                        titleRaw = titleRaw + ` [DEBUG_SET:${debugSet}]`;
+                        // Prepend [PACK: x] to title so it's not hidden by CSS truncation!
+                        if (actualSet > 1) {
+                            titleRaw = `[PACK:${actualSet}] ` + titleRaw;
+                        }
 
                         let bsrVal = parseInt(String(r[bsrIdx] || '').replace(/[^\d]/g, '')) || -1;
                         if (bsrVal === -1 && bsr30Idx > -1) {
@@ -1615,12 +1652,14 @@
                             bsrVal = parseInt(String(r[bsr90Idx] || '').replace(/[^\d]/g, '')) || -1;
                         }
 
+                        let displayBsr = bsrVal > 0 ? bsrVal : 'N/A';
+
                         profitable.push({
                             UPC: orig.UPC, ItemNumber: orig.ItemNumber, Description: orig.Description,
                             Cost: orig.Cost, EffectiveCost: effCost, VarCount: varCount,
                             ASIN: asin, ParentASIN: null, Title: titleRaw,
                             Brand: String(r[brandIdx] || 'N/A'), Category: String(r[catIdx] || 'N/A'),
-                            BSR: bsrVal, BSRDrop: parseInt(String(r[dropIdx] || '0').replace(/[^\d]/g, '')) > 0 ? '✅ Good' : '🛑 Slow',
+                            BSR: displayBsr, BSRDrop: parseInt(String(r[dropIdx] || '0').replace(/[^\d]/g, '')) > 0 ? '✅ Good' : '🛑 Slow',
                             KeepaRating: parseFloat(String(r[ratIdx] || 'N/A').replace(/[^\d.]/g, '')) || 'N/A',
                             KeepaReviews: parseInt(String(r[revIdx] || 'N/A').replace(/[^\d]/g, '')) || 'N/A',
                             KeepaDrops: parseInt(String(r[dropIdx] || 'N/A').replace(/[^\d]/g, '')) || 'N/A', KeepaAvg30: price,
