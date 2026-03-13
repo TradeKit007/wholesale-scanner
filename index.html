@@ -1415,24 +1415,25 @@
         window.detectSetQty = function (title) {
             if (!title) return 1;
             const numPatterns = [
-                [/(\d+)\s*-\s*pack/i, null], [/(\d+)\s*pack\b/i, null], [/pack\s+of\s+(\d+)/i, null],
-                [/set\s+of\s+(\d+)/i, null], [/case\s+of\s+(\d+)/i, null], [/box\s+of\s+(\d+)/i, null],
-                [/bag\s+of\s+(\d+)/i, null], [/lot\s+of\s+(\d+)/i, null],
-                [/(\d+)\s+per\s+case/i, null], [/(\d+)\s+per\s+pack/i, null],
-                [/(\d+)\s*-?\s*count\b/i, null], [/\((\d+)\s*count\)/i, null],
-                [/(\d+)\s*-?\s*ct\.?\b/i, null], [/(\d+)\s*-?\s*piece/i, null],
-                [/(\d+)\s*pk\b/i, null], [/\((\d+)\s*pack\)/i, null],
-                [/bundle\s+of\s+(\d+)/i, null], [/(\d+)\s*items?\b/i, null],
-                [/twin\s*pack/i, 2], [/triple\s*pack/i, 3], [/quad\s*pack/i, 4],
-                [/\[(\d+)\s*sets?\]/i, null], [/(\d+)\/PK/i, null], [/(\d+)\s*-?\s*pairs?/i, null]
+                [/(\d+)\s*-\s*pack/i, m => parseInt(m[1])], [/(\d+)\s*pack\b/i, m => parseInt(m[1])], [/pack\s+of\s+(\d+)/i, m => parseInt(m[1])],
+                [/set\s+of\s+(\d+)/i, m => parseInt(m[1])], [/case\s+of\s+(\d+)/i, m => parseInt(m[1])], [/box\s+of\s+(\d+)/i, m => parseInt(m[1])],
+                [/bag\s+of\s+(\d+)/i, m => parseInt(m[1])], [/lot\s+of\s+(\d+)/i, m => parseInt(m[1])],
+                [/(\d+)\s+per\s+case/i, m => parseInt(m[1])], [/(\d+)\s+per\s+pack/i, m => parseInt(m[1])],
+                [/(\d+)\s*-?\s*count\b/i, m => parseInt(m[1])], [/\((\d+)\s*count\)/i, m => parseInt(m[1])],
+                [/(\d+)\s*-?\s*ct\.?\b/i, m => parseInt(m[1])], [/(\d+)\s*-?\s*piece/i, m => parseInt(m[1])],
+                [/(\d+)\s*pk\b/i, m => parseInt(m[1])], [/\((\d+)\s*pack\)/i, m => parseInt(m[1])],
+                [/bundle\s+of\s+(\d+)/i, m => parseInt(m[1])], [/(\d+)\s*items?\b/i, m => parseInt(m[1])],
+                [/twin\s*pack/i, m => 2], [/triple\s*pack/i, m => 3], [/quad\s*pack/i, m => 4],
+                [/\[(\d+)\s*sets?\]/i, m => parseInt(m[1])], [/(\d+)\/PK/i, m => parseInt(m[1])], [/(\d+)\s*-?\s*pairs?/i, m => parseInt(m[1])],
+                [/(\d+)\s*ea\b/i, m => parseInt(m[1])], [/(\d+)\s*(?:\/|-)?\s*bx\b/i, m => parseInt(m[1])],
+                [/(\d+)\s*dz\b/i, m => parseInt(m[1]) * 12], [/(\d+)\s*dozen/i, m => parseInt(m[1]) * 12]
             ];
             for (let i = 0; i < numPatterns.length; i++) {
                 const rx = numPatterns[i][0];
-                const fixed = numPatterns[i][1];
+                const resolver = numPatterns[i][1];
                 const m = title.match(rx);
                 if (m) {
-                    let val = fixed !== null ? fixed : (parseInt(m[1]) || 1);
-                    return val;
+                    return resolver(m);
                 }
             }
             return 1;
@@ -1631,9 +1632,9 @@
                         let actualSet = pkgQtyVal > 1 ? pkgQtyVal : titleSetQty;
 
                         // NEW HEURISTIC: Mathematical Pack Size Guesser
-                        // If exact number wasn't found but ROI > 200% and it mentions a multipack
-                        if (actualSet === 1 && roi > 200) {
-                            const hasSetWord = /\b(pack|set|box|case|bundle|dz|dozen|pk|ct|count|pcs|pieces|pks|pairs)\b/i.test(fullSearchStr);
+                        // If exact number wasn't found but ROI > 150% and it mentions a multipack
+                        if (actualSet === 1 && roi > 150) {
+                            const hasSetWord = /(?:\b|\d|\/|-)(pack|set|box|case|bundle|dz|dozen|pk|ct|count|pcs|pieces|pks|pairs|ea|bx)\b/i.test(fullSearchStr);
                             if (hasSetWord) {
                                 let guess = Math.round((price - totalAmzFee - prepFeeVal) / (orig.Cost * 2));
                                 if (guess > 1) {
