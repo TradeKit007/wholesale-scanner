@@ -1403,6 +1403,28 @@
 
 
 
+        // Helper: Detect Set Quantity from title securely
+        window.detectSetQty = function (title) {
+            if (!title) return 1;
+            const numPatterns = [
+                [/(\d+)\s*-\s*pack/i, null], [/(\d+)\s*pack\b/i, null], [/pack\s+of\s+(\d+)/i, null],
+                [/set\s+of\s+(\d+)/i, null], [/case\s+of\s+(\d+)/i, null], [/box\s+of\s+(\d+)/i, null],
+                [/bag\s+of\s+(\d+)/i, null], [/lot\s+of\s+(\d+)/i, null],
+                [/(\d+)\s+per\s+case/i, null], [/(\d+)\s+per\s+pack/i, null],
+                [/(\d+)\s*-?\s*count\b/i, null], [/\((\d+)\s*count\)/i, null],
+                [/(\d+)\s*-?\s*ct\.?\b/i, null], [/(\d+)\s*-?\s*piece/i, null],
+                [/(\d+)\s*pk\b/i, null], [/\((\d+)\s*pack\)/i, null],
+                [/bundle\s+of\s+(\d+)/i, null], [/(\d+)\s*items?\b/i, null],
+                [/twin\s*pack/i, 2], [/triple\s*pack/i, 3], [/quad\s*pack/i, 4],
+                [/\[(\d+)\s*sets?\]/i, null], [/(\d+)\/PK/i, null], [/(\d+)\s*-?\s*pairs?/i, null]
+            ];
+            for (const [rx, fixed] of numPatterns) {
+                const m = title.match(rx);
+                if (m) return fixed !== null ? fixed : (parseInt(m[1]) || 1);
+            }
+            return 1;
+        };
+
         document.getElementById('fastKeepaExportBtn').addEventListener('click', async () => {
             if (pendingItems.length === 0) return;
             const btn = document.getElementById('fastKeepaExportBtn');
@@ -1552,36 +1574,11 @@
                         // Detect sets for high ROIs
                         let titleRaw = String(r[headers.findIndex(h => h === 'title' || h.includes('title'))] || 'N/A');
 
-                        function detectSetQty(title) {
-                            if (!title) return 1;
-                            const numPatterns = [
-                                [/(\d+)\s*-\s*[Pp]ack/, null], [/(\d+)\s*[Pp]ack\b/, null], [/[Pp]ack\s+of\s+(\d+)/, null],
-                                [/[Ss]et\s+of\s+(\d+)/, null], [/[Cc]ase\s+of\s+(\d+)/, null], [/[Bb]ox\s+of\s+(\d+)/, null],
-                                [/[Bb]ag\s+of\s+(\d+)/, null], [/[Ll]ot\s+of\s+(\d+)/, null],
-                                [/(\d+)\s+[Pp]er\s+[Cc]ase/, null], [/(\d+)\s+[Pp]er\s+[Pp]ack/, null],
-                                [/(\d+)\s*-?\s*[Cc]ount\b/, null], [/\((\d+)\s*[Cc]ount\)/, null],
-                                [/(\d+)\s*-?\s*[Cc]t\.?\b/, null], [/(\d+)\s*-?\s*[Pp]iece/, null],
-                                [/(\d+)\s*[Pp]k\b/i, null], [/\((\d+)\s*[Pp]ack\)/, null],
-                                [/[Bb]undle\s+of\s+(\d+)/, null], [/(\d+)\s*[Ii]tems?\b/, null],
-                                [/[Tt]win\s*[Pp]ack/, 2], [/[Tt]riple\s*[Pp]ack/, 3], [/[Qq]uad\s*[Pp]ack/, 4]
-                            ];
-                            for (const [rx, fixed] of numPatterns) {
-                                const m = title.match(rx);
-                                if (m) return fixed !== null ? fixed : (parseInt(m[1]) || 1);
-                            }
-                            const andSetMatch = title.match(/\w[\w\s,'-]{1,40}\s*(?:&\s*\w[\w\s,'-]{1,30})+\s+Set\b/i);
-                            if (andSetMatch) {
-                                const ampersandCount = (andSetMatch[0].match(/&/g) || []).length;
-                                if (ampersandCount >= 1) return ampersandCount + 1;
-                            }
-                            return 1;
-                        }
-
                         let effCost = orig.Cost;
                         let varCount = 1;
 
-                        if (roi > 200) {
-                            const foundSet = detectSetQty(titleRaw);
+                        if (roi > 150) {
+                            const foundSet = window.detectSetQty(titleRaw);
                             if (foundSet > 1) {
                                 varCount = foundSet;
                                 effCost = orig.Cost * varCount;
@@ -1812,44 +1809,8 @@
                     : `<span class="badge badge-clear">✓ Clear</span>`;
 
                 // ---- Set Quantity Detection ----
-                function detectSetQty(title) {
-                    if (!title) return 1;
-                    const numPatterns = [
-                        [/(\d+)\s*-\s*[Pp]ack/, null],
-                        [/(\d+)\s*[Pp]ack\b/, null],
-                        [/[Pp]ack\s+of\s+(\d+)/, null],
-                        [/[Ss]et\s+of\s+(\d+)/, null],
-                        [/[Cc]ase\s+of\s+(\d+)/, null],
-                        [/[Bb]ox\s+of\s+(\d+)/, null],
-                        [/[Bb]ag\s+of\s+(\d+)/, null],
-                        [/[Ll]ot\s+of\s+(\d+)/, null],
-                        [/(\d+)\s+[Pp]er\s+[Cc]ase/, null],  // ← KEY FIX: "3 Per Case"
-                        [/(\d+)\s+[Pp]er\s+[Pp]ack/, null],  // "3 Per Pack"
-                        [/(\d+)\s*-?\s*[Cc]ount\b/, null],
-                        [/\((\d+)\s*[Cc]ount\)/, null],
-                        [/(\d+)\s*-?\s*[Cc]t\.?\b/, null],
-                        [/(\d+)\s*-?\s*[Pp]iece/, null],
-                        [/(\d+)\s*[Pp]k\b/i, null],
-                        [/\((\d+)\s*[Pp]ack\)/, null],
-                        [/[Bb]undle\s+of\s+(\d+)/, null],
-                        [/(\d+)\s*[Ii]tems?\b/, null],
-                        [/[Tt]win\s*[Pp]ack/, 2],
-                        [/[Tt]riple\s*[Pp]ack/, 3],
-                        [/[Qq]uad\s*[Pp]ack/, 4],
-                    ];
-                    for (const [rx, fixed] of numPatterns) {
-                        const m = title.match(rx);
-                        if (m) return fixed !== null ? fixed : (parseInt(m[1]) || 1);
-                    }
-                    const andSetMatch = title.match(/\w[\w\s,'-]{1,40}\s*(?:&\s*\w[\w\s,'-]{1,30})+\s+Set\b/i);
-                    if (andSetMatch) {
-                        const ampersandCount = (andSetMatch[0].match(/&/g) || []).length;
-                        if (ampersandCount >= 1) return ampersandCount + 1;
-                    }
-                    return 1;
-                }
-                // Use VarCount from backend if available (more accurate), otherwise detect from title
-                const setQty = item.VarCount && item.VarCount > 1 ? item.VarCount : detectSetQty(item.Title);
+                // Use VarCount from backend/keepa step if available (more accurate), otherwise fallback to global detectSetQty
+                const setQty = item.VarCount && item.VarCount > 1 ? item.VarCount : window.detectSetQty(item.Title);
                 const setQtyHtml = setQty > 1
                     ? `<span style="background:#1f6feb22;color:#58a6ff;border:1px solid #1f6feb55;padding:2px 8px;border-radius:12px;font-weight:700;font-size:11px">${setQty}×</span>`
                     : `<span style="color:#484f58;font-size:11px">1×</span>`;
