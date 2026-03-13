@@ -1497,6 +1497,8 @@
                     const headers = rows[0].map(h => typeof h === 'string' ? h.toLowerCase() : '');
                     const asinIdx = headers.findIndex(h => h.includes('asin'));
                     const bsrIdx = headers.findIndex(h => h === 'sales rank: current' || h === 'sales rank' || (h.includes('sales rank') && h.includes('current')));
+                    const bsr30Idx = headers.findIndex(h => h === 'sales rank: 30 days avg.' || h.includes('30 days avg') || (h.includes('sales rank') && h.includes('30')));
+                    const bsr90Idx = headers.findIndex(h => h === 'sales rank: 90 days avg.' || h.includes('90 days avg') || (h.includes('sales rank') && h.includes('90')));
                     const bbIdx = headers.findIndex(h => h === 'buy box: current' || h === 'buy box' || (h.includes('buy box') && h.includes('current')));
                     const amzIdx = headers.findIndex(h => h === 'amazon: current' || h === 'amazon' || (h.includes('amazon') && h.includes('current')));
                     const ratIdx = headers.findIndex(h => h === 'rating' || h === 'reviews: rating');
@@ -1598,12 +1600,20 @@
 
                         titleRaw = titleRaw + ` [DEBUG_SET:${debugSet}]`;
 
+                        let bsrVal = parseInt(String(r[bsrIdx] || '').replace(/[^\d]/g, '')) || -1;
+                        if (bsrVal === -1 && bsr30Idx > -1) {
+                            bsrVal = parseInt(String(r[bsr30Idx] || '').replace(/[^\d]/g, '')) || -1;
+                        }
+                        if (bsrVal === -1 && bsr90Idx > -1) {
+                            bsrVal = parseInt(String(r[bsr90Idx] || '').replace(/[^\d]/g, '')) || -1;
+                        }
+
                         profitable.push({
                             UPC: orig.UPC, ItemNumber: orig.ItemNumber, Description: orig.Description,
                             Cost: orig.Cost, EffectiveCost: effCost, VarCount: varCount,
                             ASIN: asin, ParentASIN: null, Title: titleRaw,
                             Brand: String(r[brandIdx] || 'N/A'), Category: String(r[catIdx] || 'N/A'),
-                            BSR: parseInt(String(r[bsrIdx] || '').replace(/[^\d]/g, '')) || -1, BSRDrop: parseInt(String(r[dropIdx] || '0').replace(/[^\d]/g, '')) > 0 ? '✅ Good' : '🛑 Slow',
+                            BSR: bsrVal, BSRDrop: parseInt(String(r[dropIdx] || '0').replace(/[^\d]/g, '')) > 0 ? '✅ Good' : '🛑 Slow',
                             KeepaRating: parseFloat(String(r[ratIdx] || 'N/A').replace(/[^\d.]/g, '')) || 'N/A',
                             KeepaReviews: parseInt(String(r[revIdx] || 'N/A').replace(/[^\d]/g, '')) || 'N/A',
                             KeepaDrops: parseInt(String(r[dropIdx] || 'N/A').replace(/[^\d]/g, '')) || 'N/A', KeepaAvg30: price,
