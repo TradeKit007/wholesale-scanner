@@ -1632,22 +1632,49 @@
                         let actualSet = pkgQtyVal > 1 ? pkgQtyVal : titleSetQty;
 
                         // NEW HEURISTIC: Mathematical Pack Size Guesser
-                        // If exact number wasn't found but ROI > 150% and it mentions a multipack
-                        if (actualSet === 1 && roi > 150) {
-                            const hasSetWord = /(?:\b|\d|\/|-)(pack|set|box|case|bundle|dz|dozen|pk|ct|count|pcs|pieces|pks|pairs|ea|bx)\b/i.test(fullSearchStr);
-                            if (hasSetWord) {
-                                let guess = Math.round((price - totalAmzFee - prepFeeVal) / (orig.Cost * 2));
-                                if (guess > 1) {
-                                    const stdSizes = [2, 3, 4, 5, 6, 8, 10, 12, 18, 20, 24, 30, 36, 40, 48, 50, 60, 72, 96, 100, 120, 144, 150, 200, 250, 500, 1000];
-                                    let closest = guess;
-                                    let minDiff = guess;
-                                    for (let s of stdSizes) {
-                                        if (Math.abs(guess - s) < minDiff) {
-                                            minDiff = Math.abs(guess - s);
-                                            closest = s;
+                        // If exact number wasn't found but ROI > 120%
+                        if (actualSet === 1 && roi > 120) {
+                            const numbers = (fullSearchStr.match(/\d+/g) || []).map(Number);
+                            let bestCandidate = 1;
+                            let minDiffFromTarget = 999999;
+
+                            // 1. Try to find a number IN THE TITLE that brings ROI to a realistic range
+                            for (const n of numbers) {
+                                if (n > 1 && n <= 500) {
+                                    const tCost = orig.Cost * n;
+                                    const tNet = price - tCost - totalAmzFee - prepFeeVal;
+                                    const tRoi = tCost > 0 ? (tNet / tCost) * 100 : 0;
+                                    // A normal wholesale ROI is roughly 10% to 150%. 
+                                    // Let's accept any number that yields -20% to 250% and picks the one closest to 40%.
+                                    if (tRoi >= -20 && tRoi <= 250) {
+                                        const diff = Math.abs(tRoi - 40);
+                                        if (diff < minDiffFromTarget) {
+                                            minDiffFromTarget = diff;
+                                            bestCandidate = n;
                                         }
                                     }
-                                    actualSet = (minDiff / guess < 0.3) ? closest : guess;
+                                }
+                            }
+
+                            if (bestCandidate > 1) {
+                                actualSet = bestCandidate;
+                            } else {
+                                // 2. Fallback: NO suitable number in title, but it mentions a multipack word.
+                                const hasSetWord = /(?:\b|\d|\/|-)(pack|set|box|case|bundle|dz|dozen|pk|ct|count|pcs|pieces|pks|pairs|ea|bx)\b/i.test(fullSearchStr);
+                                if (hasSetWord) {
+                                    let guess = Math.round((price - totalAmzFee - prepFeeVal) / (orig.Cost * 2));
+                                    if (guess > 1) {
+                                        const stdSizes = [2, 3, 4, 5, 6, 8, 10, 12, 18, 20, 24, 30, 36, 40, 48, 50, 60, 72, 96, 100, 120, 144, 150, 200, 250, 500, 1000];
+                                        let closest = guess;
+                                        let minDiff = guess;
+                                        for (let s of stdSizes) {
+                                            if (Math.abs(guess - s) < minDiff) {
+                                                minDiff = Math.abs(guess - s);
+                                                closest = s;
+                                            }
+                                        }
+                                        actualSet = (minDiff / guess < 0.3) ? closest : guess;
+                                    }
                                 }
                             }
                         }
