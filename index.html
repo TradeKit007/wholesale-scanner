@@ -1661,7 +1661,9 @@
                         const fullSearchStr = (titleRaw + " " + String(orig.Description || "")).toLowerCase();
                         const titleSetQty = window.detectSetQty(fullSearchStr);
 
+                        // Did regex or Keepa find a definitive pack? (reliable - always recalculate)
                         let actualSet = pkgQtyVal > 1 ? pkgQtyVal : titleSetQty;
+                        const reliablePackDetected = actualSet > 1; // regex or Keepa found it
 
                         // NEW HEURISTIC: Mathematical Pack Size Guesser
                         // If exact number wasn't found but ROI > 120%
@@ -1711,8 +1713,8 @@
                             }
                         }
 
-                        // Recalculate if it's a multipack OR (ROI > 150% and detected a set)
-                        if (actualSet > 1 && (pkgQtyVal > 1 || roi > 150)) {
+                        // Always recalculate cost when a pack is detected (reliable regex/Keepa OR mathematical guesser)
+                        if (actualSet > 1) {
                             varCount = actualSet;
                             effCost = orig.Cost * varCount;
                             netProfit = price - effCost - totalAmzFee - prepFeeVal;
