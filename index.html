@@ -1477,7 +1477,7 @@
 
                 if (allIds.length > 0) {
                     localStorage.setItem('keepaFastMap', JSON.stringify(localMap));
-                    const blob = new Blob([allIds.join('\n')], { type: 'text/plain' });
+                    const blob = new Blob([allIds.join('\r\n')], { type: 'text/plain;charset=utf-8' });
                     const url = URL.createObjectURL(blob);
                     const a = document.createElement('a');
                     a.href = url;
@@ -1527,6 +1527,8 @@
                     const catIdx = headers.findIndex(h => h.includes('categories: root') || h.includes('categories'));
                     const brandIdx = headers.findIndex(h => h === 'brand' || h.includes('brand'));
                     const refFeeIdx = headers.findIndex(h => h.includes('referral fee') && h.includes('%'));
+                    const newIdx = headers.findIndex(h => h === 'new: current' || (h.includes('new') && h.includes('current') && !h.includes('offer') && !h.includes('count')));
+                    const lowestNewIdx = headers.findIndex(h => h.includes('lowest new') || h.includes('new, 3rd party'));
 
                     const missingCols = [];
                     if (bsr30Idx === -1) missingCols.push("'Sales Rank: 30 days avg.'");
@@ -1600,8 +1602,16 @@
                         foundUpcsMap[orig.UPC] = true;
                         const bbRaw = parseFloat(String(r[bbIdx] || '').replace(/[^0-9.]/g, ''));
                         const amzRaw = parseFloat(String(r[amzIdx] || '').replace(/[^0-9.]/g, ''));
-                        let price = !isNaN(bbRaw) && bbRaw > 0 ? bbRaw : amzRaw;
-                        let strategy = !isNaN(bbRaw) && bbRaw > 0 ? 'Match BB FBA' : (amzRaw > 0 ? 'Match BB (Amazon)' : 'OOS / No Price');
+                        const newRaw = newIdx > -1 ? parseFloat(String(r[newIdx] || '').replace(/[^0-9.]/g, '')) : NaN;
+                        const lowestNewRaw = lowestNewIdx > -1 ? parseFloat(String(r[lowestNewIdx] || '').replace(/[^0-9.]/g, '')) : NaN;
+                        let price = !isNaN(bbRaw) && bbRaw > 0 ? bbRaw
+                            : (!isNaN(amzRaw) && amzRaw > 0 ? amzRaw
+                            : (!isNaN(newRaw) && newRaw > 0 ? newRaw
+                            : (!isNaN(lowestNewRaw) && lowestNewRaw > 0 ? lowestNewRaw : NaN)));
+                        let strategy = !isNaN(bbRaw) && bbRaw > 0 ? 'Match BB FBA'
+                            : (!isNaN(amzRaw) && amzRaw > 0 ? 'Match Amazon'
+                            : (!isNaN(newRaw) && newRaw > 0 ? 'Match New 3P'
+                            : 'OOS / No Price'));
 
                         if (isNaN(price) || price <= 0) {
                             problematic.push({ UPC: orig.UPC, ItemNumber: orig.ItemNumber, Cost: orig.Cost, Description: orig.Description, Problem: 'No Price in Keepa' });
