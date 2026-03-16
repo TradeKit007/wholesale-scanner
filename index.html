@@ -1733,15 +1733,22 @@
 
                         let displayBsr = bsrVal > 0 ? bsrVal : 'N/A';
 
+                        const dropsCount = parseInt(String(r[dropIdx] || '0').replace(/[^\d]/g, '')) || 0;
+                        const dropsLabel = isOosOpportunity ? '🔥 OOS'
+                            : dropsCount === 0 ? '🛑 Slow'
+                            : dropsCount < 5  ? `⚡ Low (${dropsCount})`
+                            : dropsCount < 15 ? `✅ Good (${dropsCount})`
+                            : `🚀 Hot (${dropsCount})`;
+
                         profitable.push({
                             UPC: orig.UPC, ItemNumber: orig.ItemNumber, Description: orig.Description,
                             Cost: orig.Cost, EffectiveCost: effCost, VarCount: varCount,
                             ASIN: asin, ParentASIN: null, Title: titleRaw,
                             Brand: String(r[brandIdx] || 'N/A'), Category: String(r[catIdx] || 'N/A'),
-                            BSR: displayBsr, BSRDrop: isOosOpportunity ? '🔥 OOS' : (parseInt(String(r[dropIdx] || '0').replace(/[^\d]/g, '')) > 0 ? '✅ Good' : '🛑 Slow'),
+                            BSR: displayBsr, BSRDrop: dropsLabel,
                             KeepaRating: parseFloat(String(r[ratIdx] || 'N/A').replace(/[^\d.]/g, '')) || 'N/A',
                             KeepaReviews: parseInt(String(r[revIdx] || 'N/A').replace(/[^\d]/g, '')) || 'N/A',
-                            KeepaDrops: parseInt(String(r[dropIdx] || 'N/A').replace(/[^\d]/g, '')) || 'N/A', KeepaAvg30: price,
+                            KeepaDrops: dropsCount, KeepaAvg30: price,
                             BuyBoxPrice: price, Strategy: strategy, CalcPrice: price,
                             OffersCount: r[offersIdx] || 0, NetProfit: netProfit, ROI: roi,
                             BrandRisk: 'Clear', IsOOS: isOosOpportunity
