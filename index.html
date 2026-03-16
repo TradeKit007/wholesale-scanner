@@ -1426,7 +1426,27 @@
                 [/twin\s*pack/i, m => 2], [/triple\s*pack/i, m => 3], [/quad\s*pack/i, m => 4],
                 [/\[(\d+)\s*sets?\]/i, m => parseInt(m[1])], [/(\d+)\/PK/i, m => parseInt(m[1])], [/(\d+)\s*-?\s*pairs?/i, m => parseInt(m[1])],
                 [/(\d+)\s*ea\b/i, m => parseInt(m[1])], [/(\d+)\s*(?:\/|-)?\s*bx\b/i, m => parseInt(m[1])],
-                [/(\d+)\s*dz\b/i, m => parseInt(m[1]) * 12], [/(\d+)\s*dozen/i, m => parseInt(m[1]) * 12]
+                [/(\d+)\s*dz\b/i, m => parseInt(m[1]) * 12], [/(\d+)\s*dozen/i, m => parseInt(m[1]) * 12],
+                // Container units — common in Amazon multipack listings
+                [/(\d+)\s*bottles?\b/i, m => parseInt(m[1])],
+                [/(\d+)\s*cans?\b/i, m => parseInt(m[1])],
+                [/(\d+)\s*pouches?\b/i, m => parseInt(m[1])],
+                [/(\d+)\s*tubes?\b/i, m => parseInt(m[1])],
+                [/(\d+)\s*jars?\b/i, m => parseInt(m[1])],
+                [/(\d+)\s*pods?\b/i, m => parseInt(m[1])],
+                [/(\d+)\s*tablets?\b/i, m => parseInt(m[1])],
+                [/(\d+)\s*rolls?\b/i, m => parseInt(m[1])],
+                [/(\d+)\s*sheets?\b/i, m => parseInt(m[1])],
+                [/(\d+)\s*vials?\b/i, m => parseInt(m[1])],
+                [/(\d+)\s*capsules?\b/i, m => parseInt(m[1])],
+                [/(\d+)\s*sachets?\b/i, m => parseInt(m[1])],
+                [/(\d+)\s*wipes?\b/i, m => parseInt(m[1])],
+                [/(\d+)\s*gallons?\b/i, m => parseInt(m[1])],
+                [/(\d+)\s*units?\b/i, m => parseInt(m[1])],
+                [/(\d+)\s*sprays?\b/i, m => parseInt(m[1])],
+                [/(\d+)\s*sticks?\b/i, m => parseInt(m[1])],
+                [/(\d+)\s*bars?\b/i, m => parseInt(m[1])],
+                [/(\d+)\s*doses?\b/i, m => parseInt(m[1])],
             ];
             for (let i = 0; i < numPatterns.length; i++) {
                 const rx = numPatterns[i][0];
