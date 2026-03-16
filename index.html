@@ -1519,7 +1519,7 @@
                     const bbIdx = headers.findIndex(h => h === 'buy box: current' || h === 'buy box' || (h.includes('buy box') && h.includes('current')));
                     const amzIdx = headers.findIndex(h => h === 'amazon: current' || h === 'amazon' || (h.includes('amazon') && h.includes('current')));
                     const ratIdx = headers.findIndex(h => h === 'rating' || h === 'reviews: rating');
-                    const revIdx = headers.findIndex(h => h === 'review count' || h === 'rating count' || h.startsWith('review count'));
+                    const revIdx = headers.findIndex(h => h.includes('review count') || h.includes('rating count'));
                     const drop30Idx = headers.findIndex(h => h.includes('drops') && h.includes('30'));
                     const drop90Idx = headers.findIndex(h => h.includes('drops') && h.includes('90'));
                     const dropIdx = drop30Idx > -1 ? drop30Idx : drop90Idx;
