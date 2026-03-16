@@ -1529,6 +1529,8 @@
                     const refFeeIdx = headers.findIndex(h => h.includes('referral fee') && h.includes('%'));
                     const newIdx = headers.findIndex(h => h === 'new: current' || (h.includes('new') && h.includes('current') && !h.includes('offer') && !h.includes('count')));
                     const lowestNewIdx = headers.findIndex(h => h.includes('lowest new') || h.includes('new, 3rd party'));
+                    const bb30Idx = headers.findIndex(h => h.includes('buy box') && h.includes('30'));
+                    const bb90Idx = headers.findIndex(h => h.includes('buy box') && h.includes('90'));
 
                     const missingCols = [];
                     if (bsr30Idx === -1) missingCols.push("'Sales Rank: 30 days avg.'");
@@ -1604,14 +1606,30 @@
                         const amzRaw = parseFloat(String(r[amzIdx] || '').replace(/[^0-9.]/g, ''));
                         const newRaw = newIdx > -1 ? parseFloat(String(r[newIdx] || '').replace(/[^0-9.]/g, '')) : NaN;
                         const lowestNewRaw = lowestNewIdx > -1 ? parseFloat(String(r[lowestNewIdx] || '').replace(/[^0-9.]/g, '')) : NaN;
+                        const bb30Raw = bb30Idx > -1 ? parseFloat(String(r[bb30Idx] || '').replace(/[^0-9.]/g, '')) : NaN;
+                        const bb90Raw = bb90Idx > -1 ? parseFloat(String(r[bb90Idx] || '').replace(/[^0-9.]/g, '')) : NaN;
+
+                        let isOosOpportunity = false;
                         let price = !isNaN(bbRaw) && bbRaw > 0 ? bbRaw
                             : (!isNaN(amzRaw) && amzRaw > 0 ? amzRaw
                             : (!isNaN(newRaw) && newRaw > 0 ? newRaw
                             : (!isNaN(lowestNewRaw) && lowestNewRaw > 0 ? lowestNewRaw : NaN)));
+
                         let strategy = !isNaN(bbRaw) && bbRaw > 0 ? 'Match BB FBA'
                             : (!isNaN(amzRaw) && amzRaw > 0 ? 'Match Amazon'
                             : (!isNaN(newRaw) && newRaw > 0 ? 'Match New 3P'
                             : 'OOS / No Price'));
+
+                        // If no current price but have historical avg → OOS Opportunity!
+                        if ((isNaN(price) || price <= 0)) {
+                            const histPrice = !isNaN(bb30Raw) && bb30Raw > 0 ? bb30Raw
+                                : (!isNaN(bb90Raw) && bb90Raw > 0 ? bb90Raw : NaN);
+                            if (!isNaN(histPrice) && histPrice > 0) {
+                                price = histPrice;
+                                strategy = '🔥 OOS Opportunity';
+                                isOosOpportunity = true;
+                            }
+                        }
 
                         if (isNaN(price) || price <= 0) {
                             problematic.push({ UPC: orig.UPC, ItemNumber: orig.ItemNumber, Cost: orig.Cost, Description: orig.Description, Problem: 'No Price in Keepa' });
@@ -1720,13 +1738,13 @@
                             Cost: orig.Cost, EffectiveCost: effCost, VarCount: varCount,
                             ASIN: asin, ParentASIN: null, Title: titleRaw,
                             Brand: String(r[brandIdx] || 'N/A'), Category: String(r[catIdx] || 'N/A'),
-                            BSR: displayBsr, BSRDrop: parseInt(String(r[dropIdx] || '0').replace(/[^\d]/g, '')) > 0 ? '✅ Good' : '🛑 Slow',
+                            BSR: displayBsr, BSRDrop: isOosOpportunity ? '🔥 OOS' : (parseInt(String(r[dropIdx] || '0').replace(/[^\d]/g, '')) > 0 ? '✅ Good' : '🛑 Slow'),
                             KeepaRating: parseFloat(String(r[ratIdx] || 'N/A').replace(/[^\d.]/g, '')) || 'N/A',
                             KeepaReviews: parseInt(String(r[revIdx] || 'N/A').replace(/[^\d]/g, '')) || 'N/A',
                             KeepaDrops: parseInt(String(r[dropIdx] || 'N/A').replace(/[^\d]/g, '')) || 'N/A', KeepaAvg30: price,
                             BuyBoxPrice: price, Strategy: strategy, CalcPrice: price,
                             OffersCount: r[offersIdx] || 0, NetProfit: netProfit, ROI: roi,
-                            BrandRisk: 'Clear'
+                            BrandRisk: 'Clear', IsOOS: isOosOpportunity
                         });
                     }
 
