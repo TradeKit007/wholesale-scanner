@@ -1533,8 +1533,6 @@
                     const lowestNewIdx = headers.findIndex(h => h.includes('lowest new'));
                     const bb30Idx     = headers.findIndex(h => h.includes('buy box') && h.includes('30'));
                     const bb90Idx     = headers.findIndex(h => h.includes('buy box') && h.includes('90'));
-                    const eanIdx      = headers.findIndex(h => h === 'ean');
-                    const upcIdx      = headers.findIndex(h => h === 'upc');
 
                     const missingCols = [];
                     if (bsr30Idx === -1) missingCols.push("'Sales Rank: 30 days avg.'");
@@ -1723,6 +1721,12 @@
 
                         netProfit = Number(netProfit.toFixed(2));
                         roi = Number(roi.toFixed(2));
+
+                        // Reject negative ROI items — move to Problematic
+                        if (roi < 0) {
+                            problematic.push({ UPC: orig.UPC, ItemNumber: orig.ItemNumber, Cost: orig.Cost, Description: orig.Description, Problem: `Збиток (від'ємний ROI ${roi}%)` });
+                            continue;
+                        }
 
                         // Prepend [PACK: x] to title so it's not hidden by CSS truncation!
                         if (actualSet > 1) {
