@@ -1364,23 +1364,39 @@
                     let rawDigits = '';
                     if (upcCol >= 0) {
                         const cellVal = String(row[upcCol] ?? '');
-                        // First try plain digits
                         rawDigits = cellVal.replace(/\D/g, '');
-                        // If the cell looks like embedded text (not just digits), try smart extraction
                         if (!rawDigits || rawDigits.length < 8) {
                             rawDigits = extractUpcFromText(cellVal);
                         }
                     }
 
-                    // If still no UPC, try to extract from description column
+                    // Fallback 1: try description column
                     if (!rawDigits && descCol >= 0) {
                         rawDigits = extractUpcFromText(String(row[descCol] ?? ''));
+                    }
+
+                    // Fallback 2: scan ALL cells in the row for any UPC-like pattern
+                    // (catches UPC in wrong column or unmapped columns)
+                    if (!rawDigits || rawDigits.length < 8) {
+                        for (let ci = 0; ci < row.length; ci++) {
+                            if (ci === upcCol || ci === descCol) continue; // already checked
+                            const candidate = extractUpcFromText(String(row[ci] ?? ''));
+                            if (candidate && candidate.length >= 8) {
+                                rawDigits = candidate;
+                                break;
+                            }
+                        }
                     }
 
                     const normUpc = rawDigits ? normalizeUpc(rawDigits) : '';
                     const asinVal = asinCol >= 0 ? String(row[asinCol] ?? '').trim().toUpperCase() : '';
 
-                    if (!asinVal && (!normUpc || !/^\d{8,14}$/.test(normUpc))) continue;
+                    if (!asinVal && (!normUpc || !/^\d{8,14}$/.test(normUpc))) {
+                        // Debug: log rows that have a cost but no valid UPC
+                        const hasCost = costCol >= 0 && parseCost(row[costCol]) > 0;
+                        if (hasCost) console.log('[Scanner] Skipped row (no UPC): ', row.slice(0, 6).join(' | '));
+                        continue;
+                    }
 
                     let cost = NaN;
                     if (costCol >= 0) cost = parseCost(row[costCol]);
