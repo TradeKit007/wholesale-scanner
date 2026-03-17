@@ -1372,7 +1372,9 @@
                     if (upcCol >= 0) {
                         const cellVal = String(row[upcCol] ?? '');
                         rawDigits = cellVal.replace(/\D/g, '');
-                        if (!rawDigits || rawDigits.length < 8) {
+                        // If digits are too short (<8) OR too long (>14, meaning garbage from stripping a sentence),
+                        // use smart extraction which correctly finds labeled UPC patterns
+                        if (!rawDigits || rawDigits.length < 8 || rawDigits.length > 14) {
                             rawDigits = extractUpcFromText(cellVal);
                         }
                     }
