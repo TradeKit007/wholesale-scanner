@@ -1341,9 +1341,42 @@
             if (_currentMappingMode === 'excel') {
                 // Excel/CSV mode: scan ALL rows, pick those with valid UPC + positive cost
                 const rows = _excelRows;
+
+                // Helper: try to extract a UPC/barcode from a text that may contain "UPC Unit 617115..." patterns
+                function extractUpcFromText(text) {
+                    if (!text) return '';
+                    const str = String(text);
+                    // Try explicit UPC label patterns first
+                    const labeled = str.match(/UPC\s*(?:Unit|#|:|-|No\.?)?\s*(\d{8,14})/i)
+                        || str.match(/EAN\s*(?:Unit|#|:|-|No\.?)?\s*(\d{8,14})/i)
+                        || str.match(/Barcode\s*(?:#|:)?\s*(\d{8,14})/i);
+                    if (labeled) return labeled[1];
+                    // Try plain long number in the cell
+                    const plain = str.match(/\b(\d{12,14})\b/) || str.match(/\b(\d{8})\b/);
+                    if (plain) return plain[1];
+                    return '';
+                }
+
                 for (const row of rows) {
                     if (!row || !Array.isArray(row)) continue;
-                    const rawDigits = upcCol >= 0 ? String(row[upcCol] ?? '').replace(/\D/g, '') : '';
+
+                    // Get raw UPC cell value
+                    let rawDigits = '';
+                    if (upcCol >= 0) {
+                        const cellVal = String(row[upcCol] ?? '');
+                        // First try plain digits
+                        rawDigits = cellVal.replace(/\D/g, '');
+                        // If the cell looks like embedded text (not just digits), try smart extraction
+                        if (!rawDigits || rawDigits.length < 8) {
+                            rawDigits = extractUpcFromText(cellVal);
+                        }
+                    }
+
+                    // If still no UPC, try to extract from description column
+                    if (!rawDigits && descCol >= 0) {
+                        rawDigits = extractUpcFromText(String(row[descCol] ?? ''));
+                    }
+
                     const normUpc = rawDigits ? normalizeUpc(rawDigits) : '';
                     const asinVal = asinCol >= 0 ? String(row[asinCol] ?? '').trim().toUpperCase() : '';
 
