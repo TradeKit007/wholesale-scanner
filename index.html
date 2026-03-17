@@ -1342,27 +1342,91 @@
                 // Excel/CSV mode: scan ALL rows, pick those with valid UPC + positive cost
                 const rows = _excelRows;
 
-                // Helper: try to extract a UPC/barcode from a text that may contain "UPC Unit 617115..." patterns
+                // ─── Smart UPC Extractor ──────────────────────────────────────────────────
+                // Validates EAN-13, UPC-A (12-digit), EAN-8 check digits
+                function isValidBarcode(digits) {
+                    const s = String(digits).replace(/\D/g, '');
+                    if (s.length !== 8 && s.length !== 12 && s.length !== 13) return false;
+                    let odd = 0, even = 0;
+                    for (let i = 0; i < s.length - 1; i++) {
+                        const d = parseInt(s[i]);
+                        // EAN-13 & EAN-8: odd positions ×1, even ×3
+                        // UPC-A (12): odd ×3, even ×1 — same as EAN-13 if treated as 13 with leading 0
+                        if (s.length === 12) {
+                            (i % 2 === 0 ? odd : even) + d; // computed below
+                        }
+                        if (s.length === 13 || s.length === 8) {
+                            if (i % 2 === 0) odd += d; else even += d;
+                        }
+                    }
+                    let check;
+                    if (s.length === 13 || s.length === 8) {
+                        check = (10 - (odd + even * 3) % 10) % 10;
+                    } else {
+                        // UPC-A: odd positions (0,2,4,6,8,10) ×3, even ×1
+                        let o2 = 0, e2 = 0;
+                        for (let i = 0; i < 11; i++) {
+                            const d = parseInt(s[i]);
+                            if (i % 2 === 0) o2 += d; else e2 += d;
+                        }
+                        check = (10 - (o2 * 3 + e2) % 10) % 10;
+                    }
+                    return parseInt(s[s.length - 1]) === check;
+                }
+
+                // Common OCR character substitutions in barcodes
+                function ocrFix(str) {
+                    return str.replace(/S/g, '5').replace(/O/g, '0').replace(/I/g, '1')
+                               .replace(/l/g, '1').replace(/B/g, '8').replace(/Z/g, '2')
+                               .replace(/G/g, '6').replace(/D/g, '0').replace(/\s/g, '');
+                }
+
+                // Extract ALL barcode candidates from a text, validate, return best
                 function extractUpcFromText(text) {
                     if (!text) return '';
                     const str = String(text);
-                    // Try explicit UPC/EAN label → numeric only first (real barcodes)
-                    const numericLabeled = str.match(/UPC\s*(?:Unit|#|:|-|No\.?)?\s*(\d{8,14})/i)
-                        || str.match(/EAN\s*(?:Unit|#|:|-|No\.?)?\s*(\d{8,14})/i)
-                        || str.match(/Barcode\s*(?:#|:)?\s*(\d{8,14})/i);
-                    if (numericLabeled) return numericLabeled[1];
-                    // Try plain 12-14 digit number (real barcode, no label needed)
-                    const plain = str.match(/\b(\d{12,14})\b/);
-                    if (plain) return plain[1];
-                    // Fallback: alphanumeric code after "UPC Unit" label (internal article codes)
-                    const alphaLabeled = str.match(/UPC\s*(?:Unit|#|:|-|No\.?)?\s*([A-Z0-9]{5,20})/i)
-                        || str.match(/EAN\s*(?:Unit|#|:|-|No\.?)?\s*([A-Z0-9]{5,20})/i);
-                    if (alphaLabeled) return alphaLabeled[1];
-                    // Last resort: try 8-digit number
-                    const short = str.match(/\b(\d{8})\b/);
-                    if (short) return short[1];
+
+                    // Extract everything that comes after UPC/EAN label (may be multiple values separated by / | ,)
+                    const labeledSection = str.match(/(?:UPC|EAN|Barcode)\s*(?:Unit|#|:|-|No\.?)?\s*([\w\/|,\s]{5,60})/i);
+                    let candidates = [];
+
+                    if (labeledSection) {
+                        // Split the labeled section by common separators
+                        const parts = labeledSection[1].split(/[\s\/|,;]+/);
+                        for (const part of parts) {
+                            const cleaned = part.replace(/[^A-Z0-9]/gi, '');
+                            if (cleaned.length >= 8 && cleaned.length <= 14) {
+                                candidates.push(cleaned);
+                            }
+                        }
+                    }
+
+                    // Also look for any standalone plain 12-14 digit numbers anywhere in the text
+                    const standalone = str.match(/\b(\d{12,14})\b/g);
+                    if (standalone) candidates = candidates.concat(standalone);
+
+                    // Also look for any standalone 8-digit numbers
+                    const short = str.match(/\b(\d{8})\b/g);
+                    if (short) candidates = candidates.concat(short);
+
+                    // Try each candidate: first with OCR fix+check, then without, then return first labeled
+                    for (const raw of candidates) {
+                        const fixed = ocrFix(raw);
+                        if (/^\d+$/.test(fixed) && isValidBarcode(fixed)) return fixed;
+                    }
+                    // No valid check digit found → try OCR-fixed versions anyway (check digit might be wrong in source)
+                    for (const raw of candidates) {
+                        const fixed = ocrFix(raw);
+                        if (/^\d{8,14}$/.test(fixed)) return fixed;
+                    }
+                    // Fallback: any alphanumeric code after label (internal article numbers)
+                    for (const raw of candidates) {
+                        if (raw.length >= 5) return raw;
+                    }
                     return '';
                 }
+                // ─────────────────────────────────────────────────────────────────────────
+
 
                 for (const row of rows) {
                     if (!row || !Array.isArray(row)) continue;
