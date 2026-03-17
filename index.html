@@ -1346,14 +1346,21 @@
                 function extractUpcFromText(text) {
                     if (!text) return '';
                     const str = String(text);
-                    // Try explicit UPC label patterns first
-                    const labeled = str.match(/UPC\s*(?:Unit|#|:|-|No\.?)?\s*(\d{8,14})/i)
+                    // Try explicit UPC/EAN label → numeric only first (real barcodes)
+                    const numericLabeled = str.match(/UPC\s*(?:Unit|#|:|-|No\.?)?\s*(\d{8,14})/i)
                         || str.match(/EAN\s*(?:Unit|#|:|-|No\.?)?\s*(\d{8,14})/i)
                         || str.match(/Barcode\s*(?:#|:)?\s*(\d{8,14})/i);
-                    if (labeled) return labeled[1];
-                    // Try plain long number in the cell
-                    const plain = str.match(/\b(\d{12,14})\b/) || str.match(/\b(\d{8})\b/);
+                    if (numericLabeled) return numericLabeled[1];
+                    // Try plain 12-14 digit number (real barcode, no label needed)
+                    const plain = str.match(/\b(\d{12,14})\b/);
                     if (plain) return plain[1];
+                    // Fallback: alphanumeric code after "UPC Unit" label (internal article codes)
+                    const alphaLabeled = str.match(/UPC\s*(?:Unit|#|:|-|No\.?)?\s*([A-Z0-9]{5,20})/i)
+                        || str.match(/EAN\s*(?:Unit|#|:|-|No\.?)?\s*([A-Z0-9]{5,20})/i);
+                    if (alphaLabeled) return alphaLabeled[1];
+                    // Last resort: try 8-digit number
+                    const short = str.match(/\b(\d{8})\b/);
+                    if (short) return short[1];
                     return '';
                 }
 
@@ -1391,8 +1398,9 @@
                     const normUpc = rawDigits ? normalizeUpc(rawDigits) : '';
                     const asinVal = asinCol >= 0 ? String(row[asinCol] ?? '').trim().toUpperCase() : '';
 
-                    if (!asinVal && (!normUpc || !/^\d{8,14}$/.test(normUpc))) {
-                        // Debug: log rows that have a cost but no valid UPC
+                    // Accept real numeric UPCs (8-14 digits) OR alphanumeric article codes (5-20 chars)
+                    const validId = normUpc && (/^\d{8,14}$/.test(normUpc) || /^[A-Z0-9]{5,20}$/i.test(normUpc));
+                    if (!asinVal && !validId) {
                         const hasCost = costCol >= 0 && parseCost(row[costCol]) > 0;
                         if (hasCost) console.log('[Scanner] Skipped row (no UPC): ', row.slice(0, 6).join(' | '));
                         continue;
